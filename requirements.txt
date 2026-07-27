@@ -1,0 +1,25 @@
+# CPU-only PyTorch for Demucs. Installed separately from the CPU wheel index
+# (see README) so this file alone is not enough to reproduce the env with a
+# plain `pip install -r requirements.txt` -- torch/torchaudio must be
+# installed first via:
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+demucs>=4.0.0,<5
+
+# basic-pitch requires TensorFlow as a hard base dependency on Windows/Linux
+# (the [onnx] extra only *adds* onnxruntime as an alternative backend, it
+# does not remove the TensorFlow requirement). The actual conflict the spec
+# warned about: basic-pitch pins tensorflow<2.15.1, which has NO wheels for
+# Python 3.12 at all on this platform -- this is why the project venv is
+# pinned to Python 3.11 (see README). On 3.11, tensorflow 2.15.0 installs
+# alongside torch 2.13+cpu with no dependency conflict.
+basic-pitch[onnx]>=0.3.0
+
+# Pulled in transitively by basic-pitch, but imported directly by
+# tests/test_melody_extraction.py -- pinned explicitly here.
+pretty_midi>=0.2.10
+
+ffmpeg-python>=0.2.0
+librosa>=0.10.0
+soundfile>=0.12.0
+
+pytest>=8.0.0
