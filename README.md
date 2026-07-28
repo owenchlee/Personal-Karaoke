@@ -28,13 +28,18 @@ venv/Scripts/python.exe -m pytest -v
 venv/Scripts/python.exe scripts/process_song.py path/to/video.mp4 --cache-dir cache
 ```
 
-Extracts audio, separates vocal/instrumental stems, and extracts a reference melody, caching the
-results under `cache/<song-slug>/`. Rerunning on the same input reuses the cache; pass `--force`
-to reprocess. See `cache/<song-slug>/notes.json` for the note-event data and
+Extracts audio, separates vocal/instrumental stems, extracts a reference melody, and transcribes
+lyrics (with word-level timestamps), caching the results under `cache/<song-slug>/`. Rerunning on
+the same input reuses the cache; pass `--force` to reprocess. See `cache/<song-slug>/notes.json`
+for the note-event data, `cache/<song-slug>/lyrics.json` for the transcribed lyrics, and
 `cache/<song-slug>/instrumental.wav` for the backing track.
 
+Lyrics are transcribed locally from the isolated vocal stem via `faster-whisper` (no external
+lyrics source -- see `NOTES.md`), so they're a best-effort transcript, not verified-accurate
+lyrics; expect some errors, especially on melisma/fast passages.
+
 Each pipeline stage is also available standalone: `scripts/extract_audio.py`,
-`scripts/separate_stems.py`, `scripts/extract_melody.py`.
+`scripts/separate_stems.py`, `scripts/extract_melody.py`, `scripts/extract_lyrics.py`.
 
 To make a processed song playable in the frontend, publish its assets:
 
@@ -42,7 +47,7 @@ To make a processed song playable in the frontend, publish its assets:
 venv/Scripts/python.exe scripts/publish_song.py <song-slug>
 ```
 
-Copies `notes.json` + `instrumental.wav` from `cache/<song-slug>/` into
+Copies `notes.json` + `lyrics.json` + `instrumental.wav` from `cache/<song-slug>/` into
 `frontend/public/cache/<song-slug>/`, which Vite serves directly.
 
 ## Frontend
@@ -62,4 +67,5 @@ Two screens, switched via a URL query param (no routing library):
   the browser).
 
 No mic input or scoring yet -- Phase 2 only proves the note highway stays visually synced to the
-instrumental track's own playback position.
+instrumental track's own playback position. A lyrics ticker above the highway highlights the
+current/next word as the song plays, synced off the same `<audio>` `currentTime`.

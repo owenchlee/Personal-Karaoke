@@ -1,6 +1,6 @@
 """Publish a processed song's frontend-facing assets for local dev serving.
 
-Copies notes.json + instrumental.wav from cache/<song-id>/ into
+Copies notes.json + lyrics.json + instrumental.wav from cache/<song-id>/ into
 frontend/public/cache/<song-id>/ so Vite's dev server can serve them (with
 correct HTTP Range support for <audio> seeking) without a custom backend.
 
@@ -13,7 +13,7 @@ import shutil
 import sys
 from pathlib import Path
 
-_ASSETS_TO_PUBLISH = ("notes.json", "instrumental.wav")
+_ASSETS_TO_PUBLISH = ("notes.json", "lyrics.json", "instrumental.wav")
 
 
 def publish_song(song_id: str, cache_dir: str | Path, public_dir: str | Path) -> Path:

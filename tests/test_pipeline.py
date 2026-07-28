@@ -34,9 +34,13 @@ def test_process_song_runs_end_to_end_and_produces_assets(tmp_path):
     assert assets.vocals_path.exists()
     assert assets.midi_path.exists()
     assert assets.notes_path.exists()
+    assert assets.lyrics_path.exists()
 
     notes = json.loads(assets.notes_path.read_text())
     assert isinstance(notes, list)
+
+    words = json.loads(assets.lyrics_path.read_text())
+    assert isinstance(words, list)
 
     meta_path = cache_dir / "synthetic-song" / "meta.json"
     assert meta_path.exists()
@@ -50,6 +54,7 @@ def test_process_song_skips_reprocessing_when_cached(tmp_path):
     song_cache_dir.mkdir(parents=True)
     (song_cache_dir / "instrumental.wav").write_bytes(b"fake wav data")
     (song_cache_dir / "notes.json").write_text("[]")
+    (song_cache_dir / "lyrics.json").write_text("[]")
 
     fake_video_path = tmp_path / "video.mp4"
     fake_video_path.write_bytes(b"fake video data")

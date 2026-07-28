@@ -2,6 +2,7 @@ absl-py==2.5.0
 anyio==4.14.2
 astunparse==1.6.3
 audioread==3.1.0
+av==18.0.0
 basic-pitch==0.4.0
 certifi==2026.7.22
 cffi==2.1.0
@@ -9,9 +10,11 @@ charset-normalizer==3.4.9
 click==8.4.2
 colorama==0.4.6
 cryptography==49.0.0
+ctranslate2==4.8.1
 decorator==5.3.1
 demucs==4.1.0
 einops==0.8.2
+faster-whisper==1.2.1
 ffmpeg-python==0.2.0
 filelock==3.29.0
 flatbuffers==25.12.19
@@ -85,6 +88,7 @@ tensorflow-intel==2.15.0
 tensorflow-io-gcs-filesystem==0.31.0
 termcolor==3.3.0
 threadpoolctl==3.6.0
+tokenizers==0.23.1
 torch==2.13.0+cpu
 torchaudio==2.11.0+cpu
 tqdm==4.69.1
@@ -92,3 +96,4 @@ typing_extensions==4.15.0
 urllib3==2.7.0
 Werkzeug==3.1.8
 wrapt==1.14.2
+yt-dlp==2026.7.4

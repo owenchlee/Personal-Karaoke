@@ -22,4 +22,9 @@ ffmpeg-python>=0.2.0
 librosa>=0.10.0
 soundfile>=0.12.0
 
+# Local speech-to-text for lyrics transcription (word-level timestamps),
+# CPU-only via compute_type="int8". Downloads the "small" model from the
+# Hugging Face Hub on first use.
+faster-whisper>=1.0.0
+
 pytest>=8.0.0

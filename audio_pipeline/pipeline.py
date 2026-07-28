@@ -1,8 +1,9 @@
-"""End-to-end song processing: video -> audio -> stems -> melody, with caching.
+"""End-to-end song processing: video -> audio -> stems -> melody + lyrics, with
+caching.
 
-Orchestrates video_extraction, separation, and melody_extraction into a single
-call, keyed by a per-song cache directory so a song already processed is never
-reprocessed unnecessarily.
+Orchestrates video_extraction, separation, melody_extraction, and
+lyrics_extraction into a single call, keyed by a per-song cache directory so a
+song already processed is never reprocessed unnecessarily.
 """
 import json
 import re
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from audio_pipeline.lyrics_extraction import extract_lyrics
 from audio_pipeline.melody_extraction import extract_melody
 from audio_pipeline.separation import separate_stems
 from audio_pipeline.video_extraction import extract_audio
@@ -18,6 +20,7 @@ _INSTRUMENTAL_FILENAME = "instrumental.wav"
 _VOCALS_FILENAME = "vocals.wav"
 _MIDI_FILENAME = "melody.mid"
 _NOTES_FILENAME = "notes.json"
+_LYRICS_FILENAME = "lyrics.json"
 _META_FILENAME = "meta.json"
 
 
@@ -27,6 +30,7 @@ class SongAssets:
     vocals_path: Path
     midi_path: Path
     notes_path: Path
+    lyrics_path: Path
 
 
 def _slugify(name: str) -> str:
@@ -39,13 +43,15 @@ def _cached_assets(song_cache_dir: Path) -> SongAssets | None:
     vocals_path = song_cache_dir / _VOCALS_FILENAME
     midi_path = song_cache_dir / _MIDI_FILENAME
     notes_path = song_cache_dir / _NOTES_FILENAME
+    lyrics_path = song_cache_dir / _LYRICS_FILENAME
 
-    if instrumental_path.exists() and notes_path.exists():
+    if instrumental_path.exists() and notes_path.exists() and lyrics_path.exists():
         return SongAssets(
             instrumental_path=instrumental_path,
             vocals_path=vocals_path,
             midi_path=midi_path,
             notes_path=notes_path,
+            lyrics_path=lyrics_path,
         )
     return None
 
@@ -75,17 +81,20 @@ def process_song(
     extracted_wav = extract_audio(video_path, song_cache_dir)
     vocals_path, instrumental_path = separate_stems(extracted_wav, song_cache_dir)
     melody = extract_melody(vocals_path, song_cache_dir)
+    lyrics = extract_lyrics(vocals_path, song_cache_dir)
     extracted_wav.unlink(missing_ok=True)
 
     final_instrumental_path = song_cache_dir / _INSTRUMENTAL_FILENAME
     final_vocals_path = song_cache_dir / _VOCALS_FILENAME
     final_midi_path = song_cache_dir / _MIDI_FILENAME
     final_notes_path = song_cache_dir / _NOTES_FILENAME
+    final_lyrics_path = song_cache_dir / _LYRICS_FILENAME
 
     instrumental_path.replace(final_instrumental_path)
     vocals_path.replace(final_vocals_path)
     melody.midi_path.replace(final_midi_path)
     melody.notes_path.replace(final_notes_path)
+    lyrics.lyrics_path.replace(final_lyrics_path)
 
     meta = {
         "source_file": str(video_path),
@@ -99,4 +108,5 @@ def process_song(
         vocals_path=final_vocals_path,
         midi_path=final_midi_path,
         notes_path=final_notes_path,
+        lyrics_path=final_lyrics_path,
     )

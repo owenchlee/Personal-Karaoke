@@ -208,9 +208,199 @@ since the only available test video does not contain this kind of noise (checked
 `vocals.wav`'s first/last 15s are already near-silent, RMS <= 0.008, so Demucs isn't leaking
 non-song noise into the vocal stem for this particular source). The fix above should help in
 general -- background noise/chatter typically produces lower and less temporally-stable pitch
-confidence than sustained singing, so the raised `onset_threshold`/`frame_threshold` and the
-vocal-frequency bounds should suppress much of it -- but this is reasoning from how basic-pitch's
-confidence scoring works, not something measured against a real noisy example. If a future video
-still shows spurious notes from background noise, that should be treated as a fresh investigation
-with real evidence (which section of audio, what the vocal stem sounds like there) rather than
-more speculative threshold tuning.
+confidence than sustained singing, so the vocal-frequency bounds should suppress some of it -- but
+this is reasoning from how basic-pitch's confidence scoring works, not something measured against
+a real noisy example. If a future video still shows spurious notes from background noise, that
+should be treated as a fresh investigation with real evidence (which section of audio, what the
+vocal stem sounds like there) rather than more speculative threshold tuning.
+
+### Correction (recorded 2026-07-27): onset_threshold=0.65 was an overcorrection
+
+After the fix above shipped, manual play-through surfaced a new symptom: real singing with no note
+bar at all in places. Investigated by comparing note coverage directly against the vocal stem's
+own energy envelope (0.25s RMS buckets, `has_energy` = RMS above the 40th percentile of non-silent
+buckets) rather than guessing from note-count stats alone -- fragmentation metrics alone can't
+detect missed notes, only extra/short ones.
+
+Result: raising `onset_threshold` to 0.65 pushed real, legitimately-confident onsets below the bar
+along with the spurious ones. Coverage got *worse* than the pre-fix baseline: 15% of clearly-sung
+0.25s buckets had no covering note at onset=0.65, vs. 8% at basic-pitch's own default onset=0.5.
+Confirmed concretely on the 218-223s window (audible singing, RMS up to 0.31): baseline found 13
+overlapping onset candidates there; onset=0.65 kept only 5, leaving three multi-second silent gaps
+in the highway during real singing.
+
+Swept `onset_threshold` x `frame_threshold` against both the fragmentation metrics (note count,
+%under 200ms, median duration) and the new energy-coverage metric to find a setting that doesn't
+trade one failure mode for the other. `minimum_frequency`/`maximum_frequency` were confirmed to
+have negligible effect on coverage (51 vs 51 missed buckets with/without), so those stay.
+
+**Corrected settings**: `onset_threshold=0.5` (basic-pitch's own default -- back off from 0.65),
+`frame_threshold=0.2` (down from 0.25, lets real notes bridge slightly deeper energy dips),
+`melodia_trick=False` and the frequency bounds unchanged. On the test song: 622 notes (vs. the
+original 670 and the overcorrected 378), 31% under 200ms (vs. original 51%, overcorrected 25%),
+median duration 0.245s (vs. original 0.197s), missed-energy coverage 8% -- same as the original
+untuned baseline, not worse. This is a real trade-off, not a free win: still meaningfully less
+fragmented than the original defaults, at the cost of accepting somewhat more short notes and
+diff-pitch overlaps than the (coverage-broken) 0.65 attempt had.
+
+### Second correction (recorded 2026-07-27): silence-gate notes against the vocal stem's own RMS
+
+Next symptom reported: the instrumental-only intro still showed note bars with no singing. Root
+cause, confirmed by checking each early note's onset against the vocal stem's actual RMS at that
+timestamp: basic-pitch's own confidence score ("velocity") is not a reliable silence detector. On
+this song's instrumental intro the vocal stem is genuinely near-total silence (RMS ~0.0000-0.0001,
+~1000x below the median non-silent RMS of ~0.096), yet basic-pitch still emitted notes there with
+moderate reported velocity (0.27-0.55) -- an artifact of how its front end normalizes near-zero
+input, not evidence of real signal.
+
+Fix: added `_note_rms()` in `melody_extraction.py`, which loads the vocal stem directly (via
+`soundfile`, same library used elsewhere in this pipeline) and computes each note's actual RMS
+over its own `[onset, offset]` window, independent of anything basic-pitch reports. Notes below
+`_SILENCE_RMS_GATE = 0.01` are dropped before the JSON/MIDI are written. The MIDI file is now
+rebuilt from the filtered note list directly (previously written straight from basic-pitch's
+`midi_data`) so the two output artifacts stay consistent.
+
+Checked this threshold isn't a fragile magic number: computed per-note RMS for all 622 notes from
+the prior correction and found a stark, clean bimodal split with no notes anywhere in between --
+24 notes measured ~0.00004 RMS (the spurious ones), then every other note measured >= 0.05. Any
+gate value between ~0.001 and ~0.04 drops exactly the same 24 notes and keeps the other 598; 0.01
+sits comfortably in that gap. Re-ran on the test song: 622 -> 598 notes, first note onset moved
+from 1.93s to 18.13s (matching the song's real instrumental intro before singing starts).
+
+Same caveat as before applies to future songs: this gate is only as good as Demucs's separation
+quality plus the assumption that non-silence in the vocal stem means singing. A song with loud
+sustained non-vocal bleed in its vocal stem (rather than near-silence) wouldn't be caught by this
+gate -- that would need fresh evidence, not more speculative tuning, if it comes up.
+
+### Third correction (recorded 2026-07-27): enforce monophony -- no simultaneous note bars
+
+Next symptom: the highway sometimes showed two note bars at once ("parallel bars"), implying two
+simultaneous voices, which is wrong for a solo vocal line. This is the same overlap issue flagged
+earlier as "natural pitch-transition artifacts" and left alone -- that call was wrong once it was
+actually visible in the game; overlaps are never correct for monophonic vocals and needed a real
+fix, not just an explanation.
+
+Root cause: basic-pitch is a polyphonic transcription model (its main use case is piano, which
+really can have simultaneous notes); it doesn't know a solo vocal line can't. Checked the pitch
+relationship of all 221 overlapping pairs in the (598-note, post-silence-gate) extraction: 58%
+were exactly one octave (12 semitones) apart -- the textbook signature of the model detecting a
+strong 2nd harmonic as if it were its own note alongside the true fundamental.
+
+Fix: added `_enforce_monophony()` in `melody_extraction.py`, a strict post-process that walks
+notes in onset order and never lets two stay overlapping:
+- If a note's entire span sits inside the currently-kept note's span, drop it. Checked this is a
+  safe rule before relying on it: of the 77 fully-contained overlap pairs in the data, the
+  containing note was longer in 100% of cases (true by construction -- a shorter span can't fully
+  contain a longer one), so "keep the longer, drop the nested one" isn't a coin flip, it's
+  definitional.
+- For partial overlaps (a real melodic transition where two detections briefly disagree), keep
+  whichever note has higher basic-pitch confidence ("velocity") and trim the other's boundary back
+  to remove the overlap, dropping it outright if trimming would leave a sliver under 50ms.
+- Resolves overlap chains (A overlaps B overlaps C) correctly via a small while-loop, not just a
+  single pairwise comparison -- verified with a dedicated unit test
+  (`test_enforce_monophony_handles_a_three_note_overlap_chain`).
+
+Re-ran on the test song: 598 -> 450 notes, overlaps 221 -> 0 (confirmed by direct check, not
+sampled). Added 3 unit tests in `tests/test_melody_extraction.py` covering full containment,
+partial-overlap trimming, and a 3-note overlap chain, plus a no-overlap assertion in the existing
+end-to-end smoke test. 11/11 Python tests pass.
+
+## Lyrics feature (recorded 2026-07-27)
+
+New request: show lyrics above the note highway (highway moved down to make room), with the
+current/next word highlighted and the display moving as the song progresses.
+
+**Lyrics source decision**: no lyrics data existed anywhere in the pipeline before this. Asked the
+user how to source lyrics text + word timing; ruled out fetching lyrics from any external
+site/API myself (would mean reproducing copyrighted lyrics text, which isn't something I can do
+regardless of personal-use framing). Chosen approach: transcribe locally from the vocal stem using
+`faster-whisper` (model size `small`, CPU, `compute_type="int8"`, `word_timestamps=True`) -- a
+transcript of audio the user already has, not lyrics sourced from an external database. Benchmark
+on the 274s test song: 36s transcription time (~7.6x realtime), well within budget; produced
+recognizable, mostly-correct lyrics (English, language-detection confidence 0.90) with per-word
+timestamps and per-word confidence scores.
+
+**Backend**: new `audio_pipeline/lyrics_extraction.py::extract_lyrics()`, wired into
+`pipeline.py` as a fourth stage alongside audio extraction/separation/melody, producing
+`cache/<slug>/lyrics.json` (`[{"word", "start", "end"}, ...]`). `SongAssets` and the cache
+short-circuit check (`_cached_assets`) both extended to include it. `scripts/extract_lyrics.py`
+added as a standalone CLI (same pattern as the other stages); `scripts/publish_song.py` now also
+copies `lyrics.json`. `_flatten_words()` (the JSON-shaping logic) is unit tested directly against
+constructed `faster_whisper` `Word`/`Segment` objects, without needing the model; the end-to-end
+`extract_lyrics()` smoke test uses a non-speech synthetic clip (same accuracy caveat as the melody
+smoke test -- proves the pipeline runs and produces valid JSON, not transcription accuracy).
+14 Python tests pass.
+
+**Frontend**: new `frontend/src/types/lyrics.ts` (`LyricWord`), `frontend/src/game/lyrics.ts`
+(`getCurrentWordIndex(words, currentTime)` -- returns the word currently being sung, or during a
+gap between words, the upcoming one; -1 once lyrics are finished; 6 vitest unit tests), and
+`frontend/src/components/LyricsDisplay.tsx`. `LyricsDisplay` follows the same pattern established
+for `NoteHighway`: a `requestAnimationFrame` loop reads `audioRef.current.currentTime` directly
+(no React state, no separate clock) and only touches the DOM -- via `classList`, not React
+state/re-render -- when the active word index actually changes, then calls `scrollIntoView` on the
+new active word inside a horizontally-scrolling ticker (`overflow-x: auto`, `white-space: nowrap`)
+so the highlighted word animates into view. `.lyric-word`/`.lyric-word--active` styles added to
+`index.css` reusing the existing theme's accent variables (so it respects the light/dark toggle
+like the rest of the page). `GameScreen.tsx` now fetches `notes.json` and `lyrics.json` in
+parallel, and renders order is title -> audio controls -> `LyricsDisplay` -> `NoteHighway` (moved
+down accordingly). 18 vitest tests pass total; `tsc --noEmit` clean.
+
+**Manual verification**: loaded the game screen in a real browser. Confirmed (screenshot): lyrics
+render above the highway with the first word already highlighted before playback starts (matches
+the "index 0 = next word" design for `getCurrentWordIndex` at `currentTime=0`), no console errors.
+Also visually reconfirmed the earlier "no notes during instrumental-only intro" fix: the highway
+is empty under the playhead at `t=0` now, matching the real ~18s instrumental intro. Did not
+verify the actual highlight-advances-and-scrolls-during-playback behavior or transcription
+accuracy against the real vocals by ear -- both need the same manual human check already pending
+from Phase 2 (audio playback can't be verified through this browser automation, see above).
+
+## Lyrics follow-up: multi-line display + model accuracy (recorded 2026-07-27)
+
+Two issues reported after the above: (1) wanted at least 3 lines of lyrics visible, not a single
+horizontal ticker line; (2) the very first transcribed word was wrong.
+
+**Multi-line display**: the flat word list had no line/phrase grouping (it was discarded when
+flattening basic-pitch -- er, faster-whisper -- segments). Added a `line` index to each word in
+`_flatten_words()` (`lyrics_extraction.py`): sequential per segment, but only incremented for
+segments that actually produced words, so line numbers stay contiguous with no gaps (covered by
+`test_flatten_words_does_not_reserve_a_line_number_for_empty_segments`). `lyrics.json` schema is
+now `[{"word", "start", "end", "line"}, ...]`.
+
+Frontend: `groupWordsByLine()` and `getCurrentLineIndex()` added to `game/lyrics.ts` (5 new vitest
+tests). `LyricsDisplay.tsx` rewritten from a single horizontal ticker to three stacked lines
+(prev/current/next), current line larger and full-opacity, prev/next dimmed -- classic karaoke
+"teleprompter" layout. As the active word's line changes, `currentLineIndex` (React state, updated
+only on line change, not per frame) shifts which three lines are shown, so the whole block visibly
+moves down as the song progresses, on top of the existing per-word highlight within the current
+line. One subtlety worth recording: the active-word DOM lookup is scoped to a wrapper `ref`
+around all three lines, not just the "current" line's div -- on the exact frame a line transitions,
+the new active word's `<span>` was rendered a moment earlier as part of the "next" row (React
+hasn't re-tagged it as "current" yet, since the state update is async), so scoping the lookup to
+only the current-line div would silently fail to find it right at every line boundary. Scoping to
+the shared wrapper sidesteps this instead of relying on render timing.
+
+**Wrong first word**: benchmarked `faster-whisper` model sizes `small` (already in use), `medium`,
+and `large-v3` against the same real vocal stem. `small` and `medium` independently produced the
+identical wrong wording ("Love and can hurt, love and can hurt sometimes" -- not grammatical
+English, a sign something was actually mistranscribed, not just an unlucky homophone). `large-v3`
+corrected it to "Loving can hurt, loving can hurt sometimes" -- grammatical and evidently the
+right reading. This ruled out "just retune decoding params on the small model" as a fix; the
+small/medium checkpoints were consistently wrong here, not just uncertain. Switched
+`_MODEL_SIZE` to `large-v3` and added `vad_filter=True` (suppresses hallucinated words in
+silence, same intent as the melody pipeline's RMS silence gate). Cost: 380.9s to transcribe the
+274s test song (~1.4x realtime) vs. 142.8s for `medium` -- accepted since this is one-time offline
+per-song processing and the accuracy gap was decisive, not marginal. Re-ran on the test song and
+republished; full test suite still fast (large model load dominates on a real song, but the
+short synthetic clips used in tests keep the smoke tests quick).
+
+Same caveat as always: transcription of sung vocals is inherently imperfect even with the largest
+local model, especially on melisma/fast lyrics/heavy vibrato -- expect some remaining errors, not
+a fully solved problem.
+
+**Manual verification**: regenerated `cache/test-song/lyrics.json` with `large-v3` (270s), 375
+words across 52 lines, confirmed the first word is now "Loving" (matches the corrected reading
+above). Republished and reloaded the game screen in a real browser: three-line layout renders
+correctly (current line prominent with "Loving" pre-highlighted, next line dimmed below it, no
+console errors). Did not verify line-transition/scroll behavior during actual playback or listen
+to the full transcription by ear -- still blocked on the same audio-playback automation
+limitation as Phase 2; needs the same pending manual human check.
