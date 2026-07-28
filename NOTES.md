@@ -105,13 +105,112 @@ step is codec/container agnostic so this exercises the same code path as a video
   that range (MIDI 29-31, ~49Hz), likely residual low-frequency bleed rather than real vocal
   content. Didn't do a literal listen this session (no audio playback available) -- same caveat
   as the Phase 0 outcome above.
-- **Frontend proof screen**: manually loaded in a real browser (Chrome via automation). Playback
-  proof verified working for both the `<audio>` element path and the raw Web Audio API path (no
-  console errors on either). Mic proof triggers a real OS/browser permission prompt that
-  automation can't click through -- the code path (`getUserMedia` -> `AudioContext` ->
-  `AnalyserNode` -> level meter) is implemented and reachable, but the "level bar reacts to
-  speaking" check needs a human to click "Test Mic" and grant the permission manually.
+- **Frontend proof screen**: manually loaded in a real browser (Chrome via automation). Correction
+  to an earlier version of this entry: "no console errors" was wrongly reported as "playback
+  verified working" -- it only proves no exception was thrown, not that audio was actually
+  audible. Phase 2's investigation (below) discovered the automated browser tab used by this
+  tooling never becomes `document.visibilityState === "visible"` even when clicked/focused, and
+  Chrome suspends `<audio>`/media-element resource loading in non-visible tabs -- so audio
+  playback can't be reliably verified through this automation at all, in either phase. Mic proof
+  also triggers a real OS/browser permission prompt automation can't click through.
 - **Overall**: Phase 0 (frontend scaffold) and the revised Phase 1 (video-to-notes pipeline with
-  caching) are demoable. Outstanding before fully closing this out: a human should (1) grant mic
-  permission on the proof screen once to confirm the level meter reacts, and (2) do an actual
-  audio listen-through of `cache/test-song/{instrumental,vocals}.wav` when convenient.
+  caching) are demoable. Outstanding before fully closing this out: a human should, in a normal
+  (non-automated) browser window, (1) grant mic permission on the proof screen to confirm the
+  level meter reacts, (2) confirm the playback proof buttons produce audible sound, and (3) do an
+  actual audio listen-through of `cache/test-song/{instrumental,vocals}.wav` when convenient.
+
+## Phase 2 design + manual validation (recorded 2026-07-27)
+
+Built the note highway game screen: `frontend/src/components/GameScreen.tsx` fetches
+`/cache/<slug>/notes.json` and owns an `<audio src="/cache/<slug>/instrumental.wav" controls>`;
+`frontend/src/components/NoteHighway.tsx` is a canvas element with a `requestAnimationFrame` loop
+that reads `audioRef.current.currentTime` directly every frame (no separate clock) to draw a
+right-to-left scrolling highway (vertical = pitch via `pitchToY`, horizontal bar = duration via
+`timeToX`, both in `frontend/src/game/coords.ts`). New `scripts/publish_song.py` copies
+`notes.json`+`instrumental.wav` from `cache/<slug>/` into `frontend/public/cache/<slug>/` for
+Vite to serve (already-ignored by the existing `cache/` gitignore rule at any depth -- verified
+via `git check-ignore`). Old Phase 0 proof screen moved to `frontend/src/screens/ProofScreen.tsx`,
+reachable via `?screen=proof`; the note highway is now the default screen.
+
+- **Automated**: 12 new `vitest` unit tests for the pure coordinate-mapping functions
+  (`getPitchRange`, `pitchToY`, `timeToX`, `getVisibleNotes`) all pass; `tsc --noEmit` clean;
+  Python test suite (8 tests) still passes unaffected.
+- **Manual -- visual sync confirmed working**: loaded the game screen in a real browser (Chrome
+  via automation) with the real `test-song` data (670 notes). The highway renders correctly at
+  `currentTime = 0`: playhead line visible, upcoming notes positioned to its right at plausible
+  heights, matching what the unit-tested coordinate functions predict for `t=0`.
+- **Manual -- audio playback verification blocked by the automation environment, not a code bug**:
+  pressing play never advanced the highway. Root-caused via `systematic-debugging`, not guessed:
+  - A raw `fetch()` (including byte-range requests matching what a media element sends) against
+    `/cache/test-song/instrumental.wav` returns instantly with correct headers
+    (`content-type: audio/wav`, `accept-ranges: bytes`, proper `content-range`/`content-length`,
+    streams real bytes) -- Vite's static serving and `publish_song.py`'s copy are both correct.
+  - The `<audio>` element itself, and even a bare `new Audio(url)` with no React/app code
+    involved, stay stuck at `readyState: 0` / `networkState: 2` (loading, never progressing),
+    with no `error` event and no `loadedmetadata` event, even after an explicit `.load()` call.
+  - `document.visibilityState` reports `"hidden"` for this tab and stays `"hidden"` even after
+    clicking into the page (`document.hasFocus()` becomes `true`, but `visibilityState` does not
+    change) -- Chrome deprioritizes/suspends media-element resource loading in non-visible tabs,
+    independent of any application code.
+  - Conclusion: this is a genuine limitation of verifying `<audio>` playback through this specific
+    browser-automation tooling, not a bug in `GameScreen`/`NoteHighway`/`publish_song.py`. A human
+    should open `http://localhost:5175` (or whatever port `npm run dev` picks) in their own normal
+    browser window and confirm: (1) the instrumental is audible on play, (2) dragging the native
+    seek bar resyncs the highway instantly with no glitch (the concrete proof the "no separate
+    sync logic" design works), (3) the pitch auto-fit looks reasonable for this song's real
+    MIDI 36-84 vocal range.
+- **Overall**: Phase 2's code is complete and the visual/data half is verified; the audio-sync
+  half needs one manual human check (above) before calling Phase 2 fully closed.
+
+## Melody extraction quality fix (recorded 2026-07-27)
+
+**Problem reported**: the note data included notes that don't correspond to what's actually sung,
+and note lengths didn't match how long a note is actually held. Also raised: music videos often
+have background noise unrelated to the song (crowd noise, talk, etc.) that should be kept out of
+the extracted notes.
+
+**Root cause (measured, not guessed)**: inspected `cache/test-song/notes.json` (670 notes,
+basic-pitch defaults). 51% of notes were under 200ms, many sitting right at basic-pitch's ~128ms
+minimum-length floor, with 204 pairs of overlapping notes. This is the signature of a single held
+(often vibrato-inflected) note getting chopped into several short fragments: `onset_threshold=0.5`
+lets brief mid-note energy blips register as spurious new onsets, and `melodia_trick=True` (on by
+default) actively inserts extra notes to bridge pitch-bend segments.
+
+**Fix**: tuned `basic_pitch.inference.predict()` in `audio_pipeline/melody_extraction.py`:
+`onset_threshold=0.65` (fewer spurious re-onsets mid-note), `frame_threshold=0.25` (lets a real
+note bridge brief energy dips instead of dropping out), `melodia_trick=False` (stop inventing
+bridge notes), `minimum_note_length=150` ms, and `minimum_frequency=65`/`maximum_frequency=1300`
+Hz (bounds extraction to a plausible sung-vocal range, rejecting low-frequency rumble/bleed --
+NOTES.md's earlier Phase 1 entry flagged 3 such outlier notes at ~49Hz).
+
+Verified directly against the cached `test-song` vocal stem (no need to rerun Demucs -- tested
+several parameter combinations with plain `predict()` calls before touching code): note count
+670 -> 378, notes under 200ms 51% -> 25%, overlapping-note pairs 204 -> 0 same-pitch duplicates
+(76 remaining overlaps are all different-pitch, ~10-100ms overlaps at natural pitch-transition/
+portamento boundaries between two real notes, not noise -- confirmed by inspecting example pairs),
+median note duration 0.197s -> 0.279s.
+
+Re-ran `scripts/extract_melody.py` on the cached vocal stem and `scripts/publish_song.py` to
+refresh the frontend's copy. Pitch range across the song is now MIDI 45-75, tighter than the
+previous 29-94 (the low-frequency outliers are gone).
+
+**Test fixture fix**: the existing `tests/test_melody_extraction.py` smoke test used a pure sine
+wave, which has no harmonics -- out-of-distribution for basic-pitch's model (trained on real
+instrument/vocal timbres) and already produced fragmented, low-confidence, wrongly-pitched
+detections even under the old defaults. The stricter thresholds pushed its already-marginal
+detections to zero notes, surfacing this pre-existing fixture weakness. Fixed by synthesizing a
+harmonic-rich tone (fundamental + 4 decaying overtones + an attack/decay envelope) instead --
+under the new tuned settings this now produces exactly one correctly-pitched note spanning
+the full clip, a much better proxy for real vocal audio.
+
+**Background noise (crowd noise, talk, etc. unrelated to the song)**: not separately validated,
+since the only available test video does not contain this kind of noise (checked: the separated
+`vocals.wav`'s first/last 15s are already near-silent, RMS <= 0.008, so Demucs isn't leaking
+non-song noise into the vocal stem for this particular source). The fix above should help in
+general -- background noise/chatter typically produces lower and less temporally-stable pitch
+confidence than sustained singing, so the raised `onset_threshold`/`frame_threshold` and the
+vocal-frequency bounds should suppress much of it -- but this is reasoning from how basic-pitch's
+confidence scoring works, not something measured against a real noisy example. If a future video
+still shows spurious notes from background noise, that should be treated as a fresh investigation
+with real evidence (which section of audio, what the vocal stem sounds like there) rather than
+more speculative threshold tuning.

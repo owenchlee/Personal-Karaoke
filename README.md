@@ -36,13 +36,30 @@ to reprocess. See `cache/<song-slug>/notes.json` for the note-event data and
 Each pipeline stage is also available standalone: `scripts/extract_audio.py`,
 `scripts/separate_stems.py`, `scripts/extract_melody.py`.
 
+To make a processed song playable in the frontend, publish its assets:
+
+```bash
+venv/Scripts/python.exe scripts/publish_song.py <song-slug>
+```
+
+Copies `notes.json` + `instrumental.wav` from `cache/<song-slug>/` into
+`frontend/public/cache/<song-slug>/`, which Vite serves directly.
+
 ## Frontend
 
 ```bash
 cd frontend
 npm install
 npm run dev
+npm run test   # unit tests for the note-highway coordinate math
 ```
 
-Currently a Phase 0 proof screen only (confirms mic access and audio playback work in the
-browser) -- no game logic yet.
+Two screens, switched via a URL query param (no routing library):
+
+- `/` (default) -- the note highway game screen. Loads `?song=<slug>` (default `test-song`) from
+  `frontend/public/cache/<slug>/`, published via `publish_song.py` above.
+- `/?screen=proof` -- the Phase 0 proof screen (confirms mic access and audio playback work in
+  the browser).
+
+No mic input or scoring yet -- Phase 2 only proves the note highway stays visually synced to the
+instrumental track's own playback position.

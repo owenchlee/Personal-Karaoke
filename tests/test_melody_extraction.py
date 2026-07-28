@@ -20,8 +20,17 @@ _PLAUSIBLE_VOCAL_MIDI_RANGE = (21, 108)
 
 
 def _write_synthetic_clip(path, duration_s=2.0, samplerate=22050, freq_hz=220.0):
+    # A pure sine has no harmonics, which is out-of-distribution for
+    # basic-pitch's model (trained on real instrument/vocal timbres) and
+    # produces low-confidence, fragmented detections regardless of
+    # threshold tuning. Additive harmonics make this a much closer proxy
+    # for a real sung note.
     t = np.linspace(0, duration_s, int(duration_s * samplerate), endpoint=False)
-    tone = 0.5 * np.sin(2 * np.pi * freq_hz * t)
+    envelope = np.minimum(1.0, t * 20) * np.minimum(1.0, (duration_s - t) * 20)
+    tone = np.zeros_like(t)
+    for harmonic, amplitude in enumerate([1.0, 0.5, 0.3, 0.15, 0.08], start=1):
+        tone += amplitude * np.sin(2 * np.pi * freq_hz * harmonic * t)
+    tone = 0.3 * envelope * tone / np.max(np.abs(tone))
     sf.write(path, tone.astype(np.float32), samplerate)
 
 

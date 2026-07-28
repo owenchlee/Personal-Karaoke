@@ -23,6 +23,23 @@ def _midi_to_hz(pitch_midi: int) -> float:
     return 440.0 * 2 ** ((pitch_midi - 69) / 12)
 
 
+# Tuned against a real 274s test song (see NOTES.md "Melody extraction quality
+# fix"). basic-pitch's defaults (onset=0.5, frame=0.3, melodia_trick=True)
+# fragment a single held/vibrato note into many sub-200ms pieces and invent
+# extra notes to bridge pitch bends. Raising onset_threshold cuts spurious
+# re-onsets mid-note; lowering frame_threshold lets a real note bridge brief
+# energy dips instead of dropping out; disabling melodia_trick removes its
+# note-inserting bridge behavior entirely. minimum_frequency/maximum_frequency
+# bound the extraction to a plausible sung-vocal range (~C2-E6), rejecting
+# low-frequency rumble/bleed and other non-vocal noise picked up by the
+# separator.
+_ONSET_THRESHOLD = 0.65
+_FRAME_THRESHOLD = 0.25
+_MINIMUM_NOTE_LENGTH_MS = 150.0
+_MINIMUM_FREQUENCY_HZ = 65.0
+_MAXIMUM_FREQUENCY_HZ = 1300.0
+
+
 def extract_melody(vocal_stem_path: str | Path, output_dir: str | Path) -> MelodyResult:
     """Run basic-pitch pitch extraction on ``vocal_stem_path`` and save the
     resulting melody as both a MIDI file and a JSON note-event list inside
@@ -34,7 +51,15 @@ def extract_melody(vocal_stem_path: str | Path, output_dir: str | Path) -> Melod
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    _model_output, midi_data, note_events = predict(vocal_stem_path)
+    _model_output, midi_data, note_events = predict(
+        vocal_stem_path,
+        onset_threshold=_ONSET_THRESHOLD,
+        frame_threshold=_FRAME_THRESHOLD,
+        minimum_note_length=_MINIMUM_NOTE_LENGTH_MS,
+        minimum_frequency=_MINIMUM_FREQUENCY_HZ,
+        maximum_frequency=_MAXIMUM_FREQUENCY_HZ,
+        melodia_trick=False,
+    )
 
     midi_path = output_dir / f"{vocal_stem_path.stem}_melody.mid"
     midi_data.write(str(midi_path))
