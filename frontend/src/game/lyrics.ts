@@ -9,6 +9,19 @@ export function getCurrentWordIndex(words: LyricWord[], currentTime: number): nu
   return words.findIndex((word) => word.end > currentTime)
 }
 
+/**
+ * Fraction (0-1) of `word` that's been sung by `currentTime`, for the
+ * karaoke-style fill animation. 0 before the word starts (e.g. it's only
+ * the "upcoming" word during a gap), 1 once its own end has passed. Longer
+ * words divide the same 0-1 range over more real time, so the fill
+ * naturally animates slower for them with no separate speed calculation.
+ */
+export function getWordProgress(word: LyricWord, currentTime: number): number {
+  const duration = word.end - word.start
+  if (duration <= 0) return 1
+  return Math.min(1, Math.max(0, (currentTime - word.start) / duration))
+}
+
 /** Groups a flat word list back into lines, indexed by each word's `line`. */
 export function groupWordsByLine(words: LyricWord[]): LyricWord[][] {
   const lines: LyricWord[][] = []
