@@ -404,3 +404,395 @@ correctly (current line prominent with "Loving" pre-highlighted, next line dimme
 console errors). Did not verify line-transition/scroll behavior during actual playback or listen
 to the full transcription by ear -- still blocked on the same audio-playback automation
 limitation as Phase 2; needs the same pending manual human check.
+
+## Frontend redesign + load-song-from-a-link (recorded 2026-07-28)
+
+Two requests: make the whole frontend look better (used the `ui-ux-pro-max` skill for direction),
+and add a way to load a new song by pasting a link instead of running the CLI scripts by hand.
+
+**Visual redesign**: `ui-ux-pro-max --design-system` for a "karaoke/music rhythm game" query
+recommended a dark-first indigo/violet palette with a green CTA/play accent, Poppins/Righteous
+typography, and glow/rounded-surface effects. Kept the existing light/dark `prefers-color-scheme`
+architecture (the recommendation was dark-only, but this app already had both, and NOTES.md
+already establishes that both are supported) and adapted the palette into it: violet accent
+(existing brand color, refined), green as a new `--cta` token for primary actions, semantic
+surface/border/radius/spacing tokens added to `index.css`. Deliberately did **not** pull in the
+recommended Google Fonts (Poppins/Righteous) -- kept the system-ui stack, since this is an
+offline/local personal tool and the frontend had zero non-React dependencies before this; adding a
+network font fetch for a purely cosmetic upgrade didn't seem worth breaking that. Rebuilt
+`App.tsx` (shared header/brand), `GameScreen.tsx`, `ProofScreen.tsx`, `NoteHighway.tsx` (canvas
+colors + rounded note bars), and `LyricsDisplay.tsx` on top of the new tokens and a small set of
+reusable classes (`.panel`, `.btn`/`.btn-primary`/`.btn-secondary`, `.input`, `.progress-bar`).
+
+**Load a song from a link**: previously, getting a new song into the app meant running
+`process_song.py` then `publish_song.py` by hand from a terminal. Added `scripts/server.py`, a
+small FastAPI job server: `POST /api/jobs {url}` starts a background thread that downloads audio
+via a new `audio_pipeline/download.py::download_audio()` (yt-dlp, `bestaudio` format -- feeds
+straight into the existing `extract_audio` step, which is already codec/container-agnostic per the
+Phase 1 notes above), runs it through `process_song()`, then reuses the existing
+`scripts/publish_song.py::publish_song()` unchanged. `process_song()` gained an optional
+`on_stage` callback (invoked before each stage: separating/extracting_melody/transcribing_lyrics)
+so the job server can report progress; `GET /api/jobs/<id>` exposes it for polling. `pipeline.py`'s
+`_slugify` was made public (`slugify`) since the server needs to compute the same slug the
+pipeline will use. `frontend/vite.config.ts` proxies `/api` to `http://127.0.0.1:8000` so the
+browser can call it same-origin, no CORS needed for the normal dev workflow. New
+`LoadSongForm.tsx` posts the link, polls every 2s, shows a stage label + progress bar
+(`game/jobStages.ts`, unit tested), and on completion updates the game screen's song slug (and the
+URL's `?song=` param) without a page reload.
+
+**Verification**: all 16 Python tests pass (added one covering the `on_stage` callback fires the
+three expected stage names in order), all 27 frontend vitest tests pass (9 new, covering
+`jobStages.ts`), `tsc --noEmit` clean. Manually loaded the redesigned game screen and diagnostics
+screen in a real browser -- dark theme renders as intended, no console errors. Exercised the full
+link-loading wire end-to-end with a fake URL (`https://example.com/not-a-real-video`): confirmed
+the job is created, the frontend polls and displays the job's progress UI, and -- because this
+sandboxed dev environment has no network access at all (even DNS resolution for `example.com`
+fails) -- the download step fails and that failure correctly propagates through
+`job.status = "error"` all the way to a styled error message in the form. This validates every
+piece of the new wiring (routing, threading, polling, error propagation, UI) except the actual
+"real YouTube link downloads and produces a playable song" happy path, which needs a real network
+connection to test -- that part is not yet verified by a human.
+
+## Phase 3: mic pitch detection + scoring (recorded 2026-07-28)
+
+Picked back up the Phase 3 design that had been paused mid-brainstorm for the redesign/link-loading
+work above. Design decisions from that brainstorm: full scoring (live overlay + running + final
+score), octave-tolerant matching (compare pitch class, ignore octave -- most users won't sing in
+the original recording's exact register), the live pitch trace folded to whichever octave the
+current reference note is in (so a correct different-octave match visually lines up with the note
+bar instead of looking like a big miss), and `pitchy` (McLeod Pitch Method) for detection since
+hand-rolling pitch detection risked the same kind of iterate-until-correct debugging the melody
+extraction accuracy fixes needed.
+
+**Implementation**: `game/pitch.ts` (`hzToMidi`, `foldToNearestOctave`, `findReferenceMidi`,
+`appendTracePoint` -- all pure, unit tested) and `game/scoring.ts` (pitch-class distance/match at
+a 50-cent tolerance, per-note hit/total accumulation, averaged into a 0-100 score -- also pure,
+unit tested). `hooks/useMicPitch.ts` wraps `getUserMedia` + `AnalyserNode` + `pitchy`, exposing the
+latest sample through a ref (not state) so the 60fps detection loop doesn't force 60fps
+re-renders -- same pattern already established for `NoteHighway`/`LyricsDisplay` reading
+`audioRef.current.currentTime` directly. Each sample is timestamped with the *audio's*
+`currentTime`, not wall-clock time, so it lines up with note onset/offset. `hooks/useScoring.ts`
+runs its own rAF loop matching the latest sample against whichever note covers the current
+playhead time (samples older than 200ms are treated as stale/not-currently-singing, e.g. during a
+clarity dropout), accumulating per-note accuracy and exposing a running score (React state, so it
+re-renders only when the rounded percentage actually changes) plus a `getFinalScore()` read on the
+audio's `ended` event. Scoring resets when a new song loads, or when playback restarts from the
+beginning (`currentTime < 0.5` on `play`) -- but not on a plain pause/resume, so a mid-song pause
+doesn't wipe progress. `NoteHighway.tsx` draws the live pitch as a short (~1s) trailing line,
+octave-folded per-point against `findReferenceMidi` at that point's time, in a distinct blue so it
+doesn't get confused with the green reference note bars. `GameScreen.tsx` adds an "Enable Mic"
+button (mirrors the `ProofScreen` permission-request pattern), a running score badge next to the
+song title, and a final-score banner after the song ends.
+
+**Verification**: 51 frontend vitest tests pass (24 new, covering `pitch.ts`/`scoring.ts` pure
+logic), `tsc --noEmit` clean, all 16 Python tests still pass (unaffected -- this was frontend-only).
+Manually loaded the game screen in a real browser and clicked "Enable Mic": it went active
+immediately with no permission-prompt automation blocker this time (unlike the earlier
+`ProofScreen` mic test, this browser profile already had mic permission granted for this origin),
+score badge rendered "Score: 0%" with no console errors, and the note highway kept rendering
+correctly with the new trace-drawing code path active. Same limitation as Phase 2's audio-sync
+check applies here too, though: this automation tooling can't verify actual singing-synced
+behavior (does the pitch trace track a real voice, does the score move sensibly against real
+audio) -- that needs a human to actually sing along in a normal browser window and eyeball it.
+
+### Correction (recorded 2026-07-28): trailing line was too jittery, replaced with a smoothed blob
+
+Human testing (finally exercising the real-singing path this automation can't reach) surfaced two
+problems: the live pitch indicator jumped up and down too much to be usable, and the trailing blue
+line itself wasn't the wanted visual.
+
+**Fix**: raw per-frame pitch detection is inherently noisy (vibrato, formants, occasional
+misreads) -- plotting each detected sample directly was never going to look stable regardless of
+color/shape. Added `smoothMidi()` to `game/pitch.ts`: takes the median of the last
+`SMOOTHING_WINDOW_SECONDS` (0.25s) of samples, which resists a single-frame outlier much better
+than a mean would (e.g. `[60, 60, 60, 60, 72]` -> median 60, not dragged toward the blip). The
+existing `appendTracePoint`/`TracePoint` rolling-window logic is now repurposed for this
+smoothing buffer rather than a line to draw. `NoteHighway.tsx` replaced the trailing multi-point
+line with a single circle ("blob") drawn right on the white playhead line, at the y-position of
+the current smoothed+octave-folded pitch -- simpler to read at a glance than a wandering line, and
+directly addresses "I want a blob thing on the white line" from feedback.
+
+Added 4 unit tests for `smoothMidi` (empty window, single sample, outlier resistance, even-window
+averaging). 55/55 frontend tests pass, `tsc --noEmit` clean. Manually reloaded the game screen and
+confirmed visually: a single blue-filled circle with a white ring now sits on the playhead line
+(screenshot taken). Still can't verify through this automation whether the smoothing actually
+feels right against real singing -- that's on the human tester to judge next.
+
+## Live-indicator octave anchoring fix + debug overlay (recorded 2026-07-28)
+
+Further real-singing feedback surfaced three more issues: the pill still didn't line up with what
+was being sung, a note sometimes turned green (hit) even though the pill visibly wasn't on it, and
+no way existed to check whether the mic or the reference melody was actually at fault. A screenshot
+at test-song 1:22 made the second issue concrete: the pill sat at F#3 while the just-scored note
+was F#4 -- exactly one octave apart.
+
+**Root cause**: `NoteHighway.tsx`'s octave-fold anchor (`octaveAnchorRef`) folded each sample toward
+*its own previous folded value*, never toward the actual note being judged. This was a deliberate
+earlier fix (see the Phase 3 correction above) to stop the pill snapping to a future note during a
+pause, but it over-corrected: once the detector locked onto the wrong octave of the true pitch (a
+known failure mode of autocorrelation-based detectors when a strong harmonic outweighs the
+fundamental), nothing ever pulled it back, since the anchor only ever looked at itself. Meanwhile
+`useScoring.ts` scores octave-agnostically by design, so a same-pitch-class-different-octave sample
+is a correct, intended hit -- but the pill never folded up to show that on-screen.
+
+**Fix**: `NoteHighway.tsx` now anchors the fold to `findActiveNoteIndex(notes, currentTime)`'s note
+(the exact same note `useScoring.ts` judges this sample against) whenever one is active, falling
+back to the old self-anchoring only during silence gaps/instrumental breaks -- preserving the
+original pause-fix behavior where there's no ground truth to anchor to. The existing
+`isPlausiblePitchJump` gate (previously compared the fold result to the *previous* anchor) now
+naturally compares it to *whichever anchor is used this frame*, which turns out to be exactly the
+right semantics either way (per-frame "did folding land close to the anchor's pitch class," not a
+cross-frame drift check) -- no change needed to `pitch.ts` itself.
+
+**Debug overlay**: added a "Debug" checkbox (`GameScreen.tsx`) that draws a small readout directly
+on the canvas (`NoteHighway.tsx`, `debug` prop): raw detected Hz/note/clarity/age, the active
+reference note and cents distance to it, the folded/smoothed value actually driving the pill, and
+hit% for the last few completed notes -- a concrete tool for checking detection against real
+singing without reading code.
+
+**Verification**: `tsc --noEmit` clean, all 84 frontend tests pass (no new pure-function logic was
+extracted, so no new unit tests -- the composition change lives in `NoteHighway`'s draw loop, which
+isn't unit-tested, consistent with the existing convention for that file). Verified end-to-end in a
+real browser against `test-song`: patched `navigator.mediaDevices.getUserMedia` to return a
+synthetic oscillator tone (185.0Hz, F#3 -- exactly one octave below the then-active F#4 reference
+note) feeding the *real* `pitchy` detection pipeline, not a mock. Confirmed via the new debug
+overlay: raw sample read F#3 correctly, but the pill now folds up to sit exactly on the F#4 bar
+(`pill F#4 (midi 66.00)`, `class-dist 0c`), and the running score updates accordingly. Also
+confirmed the gap-fallback path still works correctly: moving to a stretch with no active note
+correctly fell back to showing the raw (unfolded) pitch rather than snapping to a wrong note, with
+no regression of the original pause-fix behavior.
+
+## Sequential octave-jump blips in the reference melody (recorded 2026-07-28)
+
+Separately from the mic-side fix above, real singing feedback on the same screenshot flagged that
+"the singer is not changing pitches so much, so the bars are not actually mapping to the singer
+correctly" -- i.e. the *reference* note bars themselves looked erratic, not just the live indicator.
+
+**Measured** directly against `cache/test-song/notes.json` (450 notes, post-`_enforce_monophony`):
+51% of notes under 250ms, 124/449 (28%) of adjacent-note transitions jumping >=7 semitones, 49
+exact-octave jumps. Narrowing further to notes `B` sandwiched with (near-)zero gap between two
+neighbors `A`/`C` within a semitone of each other, jumping away by >=7 semitones and back: exactly
+8 clean cases (durations 0.10-0.61s). Checked velocity as a possible discriminator and found none --
+one case had `B`'s velocity *higher* than both neighbors -- confirming, same as this file's own
+RMS-silence-gate finding, that basic-pitch's confidence isn't reliable here either; the
+near-zero-gap condition (basic-pitch itself detecting no silence between the three) is the actual
+signal, not duration or velocity. This is the same octave-confusion mechanism `_enforce_monophony`
+already fixes for *overlapping* notes, just showing up sequentially instead.
+
+**Fix**: added `_collapse_octave_blips()` to `audio_pipeline/melody_extraction.py`, run right after
+`_enforce_monophony`. Drops a sandwiched blip and extends the preceding note to cover its span; if
+the two neighbors are then *exactly* the same pitch (5 of the 8 real cases; the rest were one
+semitone apart, likely a genuine re-attack) they're merged into one continuous note rather than
+left as two separate touching notes of the same pitch. 7 new unit tests in
+`tests/test_melody_extraction.py` covering the absorb case, a real-silence-gap non-match, a
+too-far-neighbors non-match, a too-small-jump non-match, the exact-vs-tolerance merge distinction,
+and an end-of-list boundary case. All 78 Python tests pass.
+
+**Re-measured** (not assumed) after re-running `scripts/extract_melody.py` on the cached
+`test-song` vocal stem: 450 -> 438 notes, big-jump transitions 124 -> 110, exact-octave jumps 49 ->
+39 -- consistent with removing the measured 8 sandwich cases (some merges eliminate two jump-
+transitions at once). Overall fragmentation barely moved (51.1% -> 50.5% under 250ms) since this
+pass only targets the specific sandwich signature, not general fragmentation -- as expected; the
+plan deliberately scoped this narrowly rather than re-opening the already-settled onset/frame
+threshold tuning from the "Melody extraction quality fix" section above. Republished via
+`scripts/publish_song.py test-song` (this also surfaced and fixed an unrelated stale gap: this
+song's `lyrics.json` was already missing from the cache before this session touched anything,
+apparently left over from an earlier session's work on lyrics zero-duration-word cleanup;
+regenerated it via `extract_lyrics` and confirmed the first word is still "Loving," matching the
+earlier corrected transcription).
+
+## Live-indicator latency: blocked on the same automation limitation as audio/mic testing
+
+Attempted to measure the live pill's actual step-response latency (does `SMOOTHING_WINDOW_SECONDS`
+0.25s + `RENDER_SMOOTHING_TAU_SECONDS` 0.1s add up to noticeable lag) objectively -- via a synthetic
+oscillator frequency step fed through the real detection pipeline, sampling the pill's canvas
+pixel position on a `requestAnimationFrame` loop, so no live human singer would be needed. This
+does not work in this automation environment: `document.visibilityState` reports `"hidden"` for
+this browser tab (confirmed directly) even with focus, and Chrome throttles/suspends
+`requestAnimationFrame` callbacks in non-visible tabs -- the exact same limitation this file already
+documented for `<audio>` playback and mic-permission testing, just hitting `NoteHighway`'s own
+render loop instead this time. A recording loop armed for 1.5s of internal (page-clock) time
+captured exactly one sample before rAF stopped firing.
+
+**Conclusion**: per the original plan, latency constants should only be retuned against real
+evidence, not guessed -- and that evidence now requires a human, the same conclusion this file has
+reached for every other real-time audio/mic behavior. The debug overlay added above already shows
+both the raw and the smoothed/pill values live, so a human tester can judge directly (open the game
+screen in a normal browser window, enable mic + debug, sing a quick pitch change, and watch whether
+the "pill" line visibly lags the "raw" line) whether retuning is actually warranted before any
+constants are touched.
+
+## pYIN-corrected reference pitch + offset, and a shared live-indicator hook (recorded 2026-07-29)
+
+Real singing (finally exercising the paths this automation can't) surfaced that the fixes above
+weren't enough: the reference bars were still wrong often enough to make singing along frustrating,
+notes routinely ended before the singer actually stopped, and there was still no easy way to tell
+*which* side (mic detection vs. reference data) was at fault without reading code.
+
+**Measured, not guessed, the scale of the reference-data problem**: cross-checked every note in
+`cache/test-song/notes.json` against `librosa.pyin` -- an independent, purpose-built monophonic
+pitch tracker, not basic-pitch's general-purpose polyphonic model -- computed once over the same
+vocal stem. 98/438 notes (22%) disagreed with pYIN's median pitch for that note's own time span by
+>=1.5 semitones, and 86 of those were *exact* octave disagreements -- basic-pitch's octave confusion
+isn't limited to the touching-blip signature `_collapse_octave_blips` targets; it also shows up as a
+single wrong-octave note with no matching neighbor to catch it against. Separately, of 185 notes
+with a real gap before the next note, 67 (36%) still had the same pitch class voiced by pYIN in the
+window right after the note's reported offset -- real singing continuing past where basic-pitch cut
+the note off.
+
+**Fix**: added `_refine_with_pyin()` to `audio_pipeline/melody_extraction.py`, run last (after
+`_enforce_monophony`/`_collapse_octave_blips`). Keeps basic-pitch for note segmentation (timing is
+its actual job) but corrects each note's pitch to pYIN's median (when enough of the note's frames
+are voiced -- `_PYIN_MIN_VOICED_FRACTION`) and extends each note's offset while pYIN keeps reporting
+the same pitch class with real RMS energy (reusing the existing `_SILENCE_RMS_GATE`), capped at the
+next note's onset so monophony is never violated.
+
+**First version of the offset-extension loop barely worked -- caught by measurement, not assumed
+correct**: initially stopped scanning forward the instant a single ~12ms step didn't match (either
+unvoiced or below the RMS gate). Re-measuring after implementing it showed the early-cutoff rate
+barely moved (36.2% -> 35.2%), which shouldn't have been possible given the pitch-correction win was
+huge. Debugged concretely (not guessed) by instrumenting the loop step-by-step on real flagged
+notes: found cases where the very first micro-frame right after a note's offset was unvoiced by
+pYIN even though the singer was clearly still holding the note a moment later (confirmed both by
+the aggregate 60%-of-window metric and by ear from the surrounding data) -- a single noisy frame
+was killing the entire extension. Rewrote the loop to tolerate brief gaps before giving up
+(`_OFFSET_EXTEND_GAP_TOLERANCE_SECONDS`, same "brief interruptions shouldn't reset tracking"
+philosophy as the frontend's own `HOLD_SECONDS`), only ever committing the offset up to the *last*
+step that actually matched. Also separately confirmed (checking RMS on genuinely-still-flagged
+cases) that a meaningful chunk of the "still flagged" cases after this fix are pYIN itself
+hallucinating a persistent pitch over real near-silence (RMS ~0.001-0.002, an order of magnitude
+below the gate) -- the same class of bug this file already found in basic-pitch's own confidence
+score -- so the *measurement* script's 60%-pitch-match-only metric is itself an overcount of real
+bugs, not just the fix falling short.
+
+**Re-measured on the real test song** (before -> after this whole pYIN pass): pitch disagreement
+with pYIN 22.4% -> 1.8%, wrong-pitch-class 2.7% -> 0.7%, notes under 250ms 50.5% -> 41.8%, median
+duration 0.244s -> 0.279s, early-cutoff-flagged 36.2% -> 31.1% (with the caveat above that this
+last metric likely still overcounts). 6 new unit tests in `tests/test_melody_extraction.py`
+(pure helper tests for `_pitch_class_distance`/`_pyin_window`, plus `_refine_with_pyin` tests using
+an in-memory synthetic harmonic tone: corrects a deliberately-wrong octave and extends a
+deliberately-cut-short offset, doesn't extend past the next note's onset, and tolerates a brief
+mid-extension dropout). 103 Python tests pass total. Adds real cost (pYIN itself takes ~28-30s on
+this song, on top of basic-pitch's own time) but this is one-time offline per-song processing, same
+tradeoff already accepted for the `large-v3` lyrics transcription. Re-ran extraction on the cached
+vocal stem and republished; a spot-check of the game screen shows the reference melody now moving
+in small, plausible steps instead of the erratic register-jumping visible in earlier screenshots.
+
+**Frontend: "hard to debug when I don't know what note it's supposed to be"** -- the canvas-only
+debug text from the previous round wasn't legible enough to be useful while actually singing.
+Extracted the fold/smoothing state machine that used to live entirely inside `NoteHighway.tsx`'s
+draw loop into a new shared hook, `hooks/useLivePitchIndicator.ts`, so every consumer of "what note
+is being sung right now" reads the exact same computed value instead of risking two independent
+implementations drifting apart. It exposes a per-frame ref (`stateRef`, for `NoteHighway`'s
+pixel-perfect pill, which now just eases toward that shared target rather than computing the fold
+itself) and throttled (100ms) React state (`display`, for text -- text doesn't need 60fps churn).
+`GameScreen.tsx` now renders an always-visible "TARGET F#4  YOU F#4  0c" readout (DOM, large text,
+color-coded green when within 50 cents) whenever the mic is active -- not just behind the debug
+toggle -- plus a proper DOM debug panel (behind the toggle) with raw Hz/clarity/age and per-note
+hit% for the last few completed notes, replacing the old tiny canvas text. New `signedCentsOff()`
+pure helper in `game/pitch.ts` (3 unit tests). 91 frontend tests pass, `tsc --noEmit` clean. Also
+fixed an unrelated `--text-muted` CSS variable typo (should have been the existing `--muted` token)
+found while touching this file, which had been silently rendering the debug toggle label with no
+color since it was introduced.
+
+**Verified end-to-end in a real browser** against the republished `test-song`: patched
+`navigator.mediaDevices.getUserMedia` to feed a synthetic F#3 tone (one octave below an active F#4
+reference note) through the real `pitchy` detection pipeline. Confirmed the pill folds up onto the
+F#4 bar, the readout shows "TARGET F#4 YOU F#4 0c" in green, and the debug panel shows the raw
+185Hz/F#3 reading alongside it -- the exact "which side is wrong" distinction the debug UX was
+built to make visible. Separately confirmed visually that the republished reference melody itself
+now moves in small, stepwise motion in a stretch that previously jumped registers erratically.
+Still not independently verified against a real human voice (same automation limitation as
+everything else real-time in this file) -- that's the next check for a human tester, now with much
+better tooling to diagnose whatever's still wrong.
+
+## Lyrics drifting out of sync with the song ("song is faster than the lyrics") (recorded 2026-07-29)
+
+Reported: lyrics increasingly out of sync with the song as it plays, plus a separate report of some
+reference notes looking wrong ("short jumps to super high pitch").
+
+**Frontend ruled out first**: `LyricsDisplay` and `NoteHighway` both read `audioRef.current.currentTime`
+from the exact same `<audio>` element every frame, no separate clock -- there is no code path where
+the frontend could let lyrics and the note highway drift apart from each other or from the song.
+`notes.json` timing is always derived locally from this song's own vocal stem (basic-pitch + pYIN,
+sharing the identical timeline as the instrumental track Demucs produces alongside it), so it can't
+drift either. That leaves lyrics sourced from the online lrclib lookup (`lyrics_lookup.py`,
+triggered whenever a song is loaded via a title, e.g. through `scripts/server.py`'s link-loading
+flow) as the only place a real desync could originate: those timestamps belong to whatever release
+lrclib matched by title, not this specific video.
+
+**Root cause**: `_align_synced_lyrics_to_audio` already corrected a *constant* intro-length mismatch
+(re-anchoring the first word to this audio's own measured vocal onset), but assumed lrclib's line
+timing otherwise ran at the exact same pace as this video throughout. A genuine tempo/pacing
+difference between releases (a different edit, a slightly different mix speed) can't be fixed by a
+single offset -- it shows up as a gap that grows across the song, exactly the reported symptom, and
+the existing code had no way to detect or correct it.
+
+**Fix**: added `_find_last_vocal_activity` (the mirror of the existing `_find_first_vocal_onset`,
+scanning from near the reported last word's end to the end of the audio) and `_fit_time_correction`,
+which fits a two-point affine map (`true_time = scale * reported_time + offset`) between
+(first word start -> first detected onset) and (last word end -> last detected activity) instead of
+assuming `scale=1`. Falls back to the previous pure-offset behavior whenever the fit isn't
+trustworthy -- last-activity not found, the two reported anchors too close together for a stable
+slope, or the fitted scale outside a generous-but-sane `[0.9, 1.1]` band (a bad end-of-song
+detection, e.g. trailing applause, is more likely than a >10% tempo difference between two releases
+of the same song). `_align_synced_lyrics_to_audio`'s existing single-offset tests all still pass
+unchanged, since their short synthetic fixtures (words a fraction of a second apart) always produce
+an implausible fitted scale and correctly fall back to the exact same offset-only path already
+covered. Added 4 new unit tests: `_fit_time_correction` in isolation (good two-anchor fit, missing
+last anchor, implausible scale, anchors too close), plus one full-integration test with two
+independent synthetic singing bursts (~80s apart) confirming the correction actually differs between
+the start and end of the song -- the concrete proof this isn't just another constant shift.
+
+**Verification**: installed the actual project dependencies into the local venv (numpy, soundfile,
+pytest, torch-cpu, faster-whisper, requests, librosa -- turns out this sandboxed environment *does*
+have real network access via pip, contradicting earlier sessions' "no network access at all" finding
+for the browser-automation tool specifically; that limitation was scoped to that tool, not this
+shell) and actually ran `tests/test_lyrics_extraction.py`: all 33 tests pass (one new test's expected
+value had an arithmetic slip caught on the first run and fixed, then re-verified passing).
+
+**Investigated the pitch-spike report against real cached data, not guessed**: wrote a standalone
+script reusing the same pYIN-tracking approach as `melody_extraction._refine_with_pyin`, run against
+every real song already cached (`ed-sheeran-photograph-lyrics`, `huang-jin-shi-dai`,
+`james-arthur-car-s-outside-lyrics`, `jamie-miller-with-salem-ilese-here-s-your-perfect-lyrics`,
+`sam-smith-i-m-not-the-only-one-lyric-video`, `song`, `test-song`). On `test-song`: 46/437 notes
+(10.5%) match the "short duration + big jump from a neighbor" shape the existing
+`_drop_unconfirmed_pitch_spikes` filter targets, but all 46 are independently confirmed by pYIN (the
+note's own reported pitch agrees with pYIN's own median for that exact window) -- meaning both
+trackers agree these are real fast pitch movements, not artifacts, and zero "slip through"
+unconfirmed. This validates the existing filter's design (already covered by
+`test_drop_unconfirmed_pitch_spikes_keeps_a_well_confirmed_short_big_jump_note`'s reasoning) rather
+than exposing a gap in it. Results across the other cached real songs recorded once that run
+finishes -- if the pattern holds everywhere, the "super high pitch" complaint is more likely a real
+(if surprising) vocal run the extraction correctly caught, and the actionable next step is a
+timestamp from the reporter so the *specific* flagged instance can be checked against the actual
+audio by ear, rather than further threshold tuning with no measured evidence of an actual miss.
+
+## Live-indicator lag fix + difficulty reduction (recorded 2026-07-29)
+
+Real singing (the human check this file's "Live-indicator latency" section above was blocked on)
+confirmed the suspicion recorded there: the pill visibly lags real singing, following the shape of
+the reference highway only *after* a note bar has already crossed the playhead rather than tracking
+it live -- exactly the "does `SMOOTHING_WINDOW_SECONDS` + `RENDER_SMOOTHING_TAU_SECONDS` add up to
+noticeable lag" question that section left for a human to judge. Also requested separately: reduce
+overall difficulty.
+
+**Lag fix**: both constants stack directly (median-filter lag from the smoothing window, then
+further easing lag from the render-side tau), so trimmed both rather than either alone.
+`useLivePitchIndicator.ts`'s `SMOOTHING_WINDOW_SECONDS` 0.25 -> 0.15 (still ~9 samples at the
+~60fps detection rate, enough to resist single-frame outliers, but median lag from a pitch change
+drops from up to ~125ms to ~75ms). `NoteHighway.tsx`'s `RENDER_SMOOTHING_TAU_SECONDS` 0.1 -> 0.05
+(halves the additional easing lag on top). Not independently measurable through this automation
+environment (same `requestAnimationFrame`-throttling-in-hidden-tabs limitation already documented
+above) -- a human tester should confirm the pill now tracks more in real time before further
+tuning.
+
+**Difficulty reduction**: `game/coords.ts`'s `DEFAULT_PX_PER_SECOND` 200 -> 160 (slower highway
+scroll, more reaction time before a note reaches the playhead -- doesn't touch note timing itself,
+which stays driven straight off `audioRef.current.currentTime`). `game/scoring.ts`'s
+`CENTS_TOLERANCE` 50 -> 70 (wider pitch-match window) and `NOTE_HIT_FRACTION_THRESHOLD` 0.5 -> 0.4
+(a note now counts as hit with a smaller fraction of matched samples).
+
+All 91 frontend vitest tests pass unaffected (none assert these specific constant values), `tsc
+--noEmit` clean. Not yet re-verified by ear/by singing against the real test song -- same pending
+human check as above.
