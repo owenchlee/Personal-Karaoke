@@ -346,18 +346,84 @@ code {
 
 .song-library-list {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  flex-direction: column;
   list-style: none;
   margin: 0;
   padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
 }
 
-.song-library-item {
+.song-library-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.song-library-row + .song-library-row {
+  border-top: 1px solid var(--border);
+}
+
+.song-library-select {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.song-library-select:hover {
+  background: var(--surface-2);
+}
+
+.song-library-title {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.song-library-date {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.song-library-delete {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-right: var(--space-3);
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.song-library-delete:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+
+.song-library-delete:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .job-progress {
@@ -529,7 +595,7 @@ code {
   align-items: center;
   gap: var(--space-1);
   font-size: 0.85rem;
-  color: var(--text-muted);
+  color: var(--muted);
   cursor: pointer;
 }
 
@@ -549,6 +615,71 @@ code {
   background: var(--cta);
   border-radius: var(--radius-sm);
   padding: var(--space-3);
+}
+
+/* Always-visible "what note should I sing vs. what am I singing" readout -- the concrete answer
+   to "hard to debug when I don't know what note it's supposed to be." Bigger and plainer than the
+   technical debug panel below, since this is meant to be readable at a glance while singing. */
+.pitch-readout {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: var(--space-5);
+  padding: var(--space-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.pitch-readout-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.pitch-readout-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pitch-readout-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-h);
+}
+
+.pitch-readout-cents {
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.pitch-readout-cents--good {
+  color: var(--cta);
+}
+
+.debug-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+}
+
+.debug-panel-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
 }
 
 .stage {

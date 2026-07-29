@@ -82,43 +82,46 @@ function ProofScreen() {
   useEffect(() => stopMicTest, [])
 
   return (
-    <main style={{ fontFamily: 'sans-serif', maxWidth: 480, margin: '2rem auto' }}>
-      <h1>Phase 0 proof screen</h1>
-      <p>
-        Proves mic access and audio playback both work in the browser. No game logic here
-        &mdash; that starts in Phase 2.
+    <main className="game-screen">
+      <p className="status-message">
+        Proves mic access and audio playback both work in the browser, independent of any game
+        logic.
       </p>
 
-      <section style={{ marginBottom: '2rem' }}>
+      <section className="panel">
         <h2>Playback proof</h2>
-        <button type="button" onClick={playViaAudioElement}>
-          Play via &lt;audio&gt;
-        </button>{' '}
-        <button type="button" onClick={() => void playViaWebAudioApi()}>
-          Play via Web Audio API
-        </button>
+        <div className="button-row">
+          <button type="button" className="btn btn-secondary" onClick={playViaAudioElement}>
+            Play via &lt;audio&gt;
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={() => void playViaWebAudioApi()}>
+            Play via Web Audio API
+          </button>
+        </div>
       </section>
 
-      <section>
+      <section className="panel">
         <h2>Mic proof</h2>
         {micStatus === 'idle' && (
-          <button type="button" onClick={() => void startMicTest()}>
+          <button type="button" className="btn btn-primary" onClick={() => void startMicTest()}>
             Test Mic
           </button>
         )}
-        {micStatus === 'requesting' && <p>Requesting mic permission&hellip;</p>}
-        {micStatus === 'denied' && <p>Mic permission denied or unavailable.</p>}
+        {micStatus === 'requesting' && <p className="muted">Requesting mic permission&hellip;</p>}
+        {micStatus === 'denied' && (
+          <p className="form-error" role="alert">
+            Mic permission denied or unavailable.
+          </p>
+        )}
         {micStatus === 'active' && (
           <>
-            <div
-              style={{
-                height: 16,
-                width: `${Math.min(micLevel * 400, 100)}%`,
-                background: '#4caf50',
-                transition: 'width 60ms linear',
-              }}
-            />
-            <button type="button" onClick={stopMicTest} style={{ marginTop: '0.5rem' }}>
+            <div className="mic-meter">
+              <div
+                className="mic-meter-fill"
+                style={{ width: `${Math.min(micLevel * 400, 100)}%` }}
+              />
+            </div>
+            <button type="button" className="btn btn-secondary" onClick={stopMicTest} style={{ marginTop: '0.75rem' }}>
               Stop
             </button>
           </>

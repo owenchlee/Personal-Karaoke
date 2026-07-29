@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { getPitchRange, getVisibleNotes, pitchToY, timeToX } from './coords'
+import {
+  getPitchAxisTicks,
+  getPitchRange,
+  getVisibleNotes,
+  midiToNoteName,
+  pitchToY,
+  timeToX,
+} from './coords'
 import type { NoteEvent } from '../types/note'
 
 function makeNote(overrides: Partial<NoteEvent>): NoteEvent {
@@ -58,6 +65,48 @@ describe('timeToX', () => {
 
   it('places a past note to the left of the playhead', () => {
     expect(timeToX(4, 5, 200, 100)).toBe(-100)
+  })
+})
+
+describe('midiToNoteName', () => {
+  it('names middle C as C4', () => {
+    expect(midiToNoteName(60)).toBe('C4')
+  })
+
+  it('names concert pitch A as A4', () => {
+    expect(midiToNoteName(69)).toBe('A4')
+  })
+
+  it('names a sharp correctly', () => {
+    expect(midiToNoteName(54)).toBe('F#3')
+  })
+
+  it('names a high belt note correctly', () => {
+    expect(midiToNoteName(85)).toBe('C#6')
+  })
+
+  it('rounds a fractional midi value before naming it', () => {
+    expect(midiToNoteName(60.4)).toBe('C4')
+  })
+})
+
+describe('getPitchAxisTicks', () => {
+  it('spaces ticks evenly across a narrow range', () => {
+    expect(getPitchAxisTicks({ min: 48, max: 72 })).toEqual([48, 52, 56, 60, 64, 68, 72])
+  })
+
+  it('uses a wider step for a wide range so it stays around the target tick count', () => {
+    const ticks = getPitchAxisTicks({ min: 51, max: 87 })
+    expect(ticks.length).toBeGreaterThanOrEqual(4)
+    expect(ticks.length).toBeLessThanOrEqual(8)
+    for (const tick of ticks) {
+      expect(tick).toBeGreaterThanOrEqual(51)
+      expect(tick).toBeLessThanOrEqual(87)
+    }
+  })
+
+  it('falls back to a single tick for a zero-span range', () => {
+    expect(getPitchAxisTicks({ min: 60, max: 60 })).toEqual([60])
   })
 })
 
