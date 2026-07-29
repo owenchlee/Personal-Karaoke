@@ -1,8 +1,12 @@
-# CPU-only PyTorch for Demucs. Installed separately from the CPU wheel index
-# (see README) so this file alone is not enough to reproduce the env with a
-# plain `pip install -r requirements.txt` -- torch/torchaudio must be
-# installed first via:
-#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+# PyTorch for Demucs and (via faster-whisper/ctranslate2) lyrics
+# transcription. Installed separately (see README) so this file alone is not
+# enough to reproduce the env with a plain `pip install -r requirements.txt`
+# -- torch/torchaudio must be installed first via:
+#   pip install torch torchaudio
+# The default PyPI wheel is CUDA-capable when the machine has a compatible
+# NVIDIA driver and falls back to CPU automatically otherwise -- device
+# selection at runtime is handled by audio_pipeline/device.py, no separate
+# GPU/CPU install branch needed.
 demucs>=4.0.0,<5
 
 # basic-pitch requires TensorFlow as a hard base dependency on Windows/Linux
@@ -11,7 +15,7 @@ demucs>=4.0.0,<5
 # warned about: basic-pitch pins tensorflow<2.15.1, which has NO wheels for
 # Python 3.12 at all on this platform -- this is why the project venv is
 # pinned to Python 3.11 (see README). On 3.11, tensorflow 2.15.0 installs
-# alongside torch 2.13+cpu with no dependency conflict.
+# alongside torch 2.13+ with no dependency conflict.
 basic-pitch[onnx]>=0.3.0
 
 # Pulled in transitively by basic-pitch, but imported directly by
@@ -22,9 +26,20 @@ ffmpeg-python>=0.2.0
 librosa>=0.10.0
 soundfile>=0.12.0
 
-# Local speech-to-text for lyrics transcription (word-level timestamps),
-# CPU-only via compute_type="int8". Downloads the "small" model from the
-# Hugging Face Hub on first use.
+# Local speech-to-text for lyrics transcription (word-level timestamps).
+# Downloads the "small" model from the Hugging Face Hub on first use.
 faster-whisper>=1.0.0
+
+# Downloads audio from a pasted link (e.g. YouTube) so the "load a song from
+# a link" flow can feed the existing file-based pipeline.
+yt-dlp>=2024.1.0
+
+# Online synced-lyrics lookup (lrclib.net) tried before falling back to
+# local transcription -- see audio_pipeline/lyrics_lookup.py.
+requests>=2.31.0
+
+# Local job server the frontend calls to kick off/poll link-based processing.
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
 
 pytest>=8.0.0

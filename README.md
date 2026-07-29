@@ -12,9 +12,13 @@ Requires **Python 3.11** specifically (see `NOTES.md` for why) and system `ffmpe
 ```bash
 py -3.11 -m venv venv
 venv/Scripts/python.exe -m pip install --upgrade pip
-venv/Scripts/python.exe -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+venv/Scripts/python.exe -m pip install torch torchaudio
 venv/Scripts/python.exe -m pip install -r requirements.txt
 ```
+
+Demucs separation and Whisper lyrics transcription automatically use an NVIDIA/CUDA GPU when one
+is available (`torch.cuda.is_available()`, see `audio_pipeline/device.py`) and fall back to CPU
+otherwise -- no config needed either way.
 
 Verify the environment:
 
@@ -66,6 +70,25 @@ Two screens, switched via a URL query param (no routing library):
 - `/?screen=proof` -- the Phase 0 proof screen (confirms mic access and audio playback work in
   the browser).
 
-No mic input or scoring yet -- Phase 2 only proves the note highway stays visually synced to the
-instrumental track's own playback position. A lyrics ticker above the highway highlights the
-current/next word as the song plays, synced off the same `<audio>` `currentTime`.
+A lyrics ticker above the highway highlights the current/next word as the song plays, synced off
+the same `<audio>` `currentTime`. Clicking "Enable Mic" turns on live pitch detection (via
+`pitchy`): your sung pitch is drawn as a trailing blue line on the highway (folded to whichever
+octave the current reference note is in, since scoring itself ignores octave -- singing the right
+note in a different register still counts), a running score badge tracks accuracy as you go, and a
+final score is shown once the song ends.
+
+## Loading a song directly from a link
+
+The game screen has a "Load a song from a link" field so you don't have to run the CLI scripts by
+hand for a new song. It needs the local job server running alongside the frontend dev server:
+
+```bash
+venv/Scripts/python.exe scripts/server.py   # in a separate terminal, keep it running
+```
+
+Pasting a link and clicking Load calls `POST /api/jobs` (proxied by Vite from `/api` to
+`http://127.0.0.1:8000`, configured in `frontend/vite.config.ts`), which downloads the audio via
+`yt-dlp` and runs the same pipeline as `process_song.py` + `publish_song.py` in a background
+thread, reporting progress while it runs (a real song takes 1.5-7 minutes -- see the pipeline
+timings above). The frontend polls `GET /api/jobs/<id>` every 2s and loads the resulting song once
+it's done.

@@ -5,12 +5,13 @@ Given an isolated vocal stem, produce word-level timestamped lyrics
 (``[{"word", "start", "end", "line"}, ...]``). If a ``lyrics_query`` (e.g.
 the song's title) is given, first tries ``lyrics_lookup.fetch_synced_lyrics``
 -- known-correct lyrics text from lrclib.net, already time-matched at line
-granularity. Falls back to local faster-whisper transcription (CPU-only) of
-the vocal stem whenever no online match is found, so the app still works
-fully offline / for songs not in that database.
+granularity. Falls back to local faster-whisper transcription of the vocal
+stem whenever no online match is found, so the app still works fully offline
+/ for songs not in that database. Runs on GPU when one is available (see
+audio_pipeline.device), CPU otherwise.
 """
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -20,17 +21,20 @@ from faster_whisper import WhisperModel
 from faster_whisper.audio import decode_audio
 from faster_whisper.transcribe import Segment
 
+from audio_pipeline.device import get_device
 from audio_pipeline.lyrics_lookup import fetch_synced_lyrics
+from audio_pipeline.text_script import has_unsupported_script
 
 # Benchmarked "small", "medium", and "large-v3" against the real test song
 # after a user-reported wrong first word ("Love and can hurt..." -- not
 # grammatical). "small" and "medium" agreed on that same wrong wording;
 # "large-v3" corrected it to "Loving can hurt..." (grammatical, and a much
 # more plausible reading of what's actually sung). Costs real time (380s vs.
-# 143s for medium on the 274s test song, CPU int8) but this is one-time
-# offline per-song processing, and the accuracy difference was decisive, not
-# marginal -- worth the wait. vad_filter=True suppresses hallucinated words
-# in silent/instrumental sections, matching the same intent as the melody
+# 143s for medium on the 274s test song, CPU int8 -- GPU is substantially
+# faster for the same model) but this is one-time offline per-song
+# processing, and the accuracy difference was decisive, not marginal --
+# worth the wait. vad_filter=True suppresses hallucinated words in
+# silent/instrumental sections, matching the same intent as the melody
 # pipeline's own silence gate.
 _MODEL_SIZE = "large-v3"
 
@@ -59,6 +63,11 @@ def _detect_language(model: WhisperModel, audio) -> str:
 @dataclass
 class LyricsResult:
     lyrics_path: Path
+    # (start, end) spans that were pure backing/ad-lib vocals, stripped out of the lyrics text by
+    # lyrics_lookup._strip_background_vocals -- only ever populated on the online synced-lyrics
+    # path (local transcription has no such markup to detect). Callers use these to also drop the
+    # corresponding note-highway notes, since that's not the line the player is meant to sing.
+    background_vocal_ranges: list[tuple[float, float]] = field(default_factory=list)
 
 
 def _flatten_words(segments: list[Segment]) -> list[dict]:
@@ -76,6 +85,8 @@ def _flatten_words(segments: list[Segment]) -> list[dict]:
         for word in segment.words:
             text = word.word.strip()
             if not text:
+                continue
+            if has_unsupported_script(text):
                 continue
             start = round(float(word.start), 4)
             end = round(float(word.end), 4)
@@ -230,6 +241,80 @@ def _rms(audio, sampling_rate: int, start_s: float, end_s: float) -> float:
     return float(np.sqrt(np.mean(np.asarray(segment, dtype=np.float64) ** 2)))
 
 
+# lrclib matches a query by title text and picks whichever result's *total duration* is closest
+# to the local audio's (see lyrics_lookup._pick_best_synced_lyrics) -- that says nothing about
+# whether its line timestamps are actually anchored to the same point in the song as this specific
+# video. A video with a longer/shorter intro than whatever release lrclib's lines were timed
+# against reads as a constant early/late offset across every line (confirmed directly: a real
+# video's vocal stem had zero energy until 3.75s, but lrclib's fetched first word was timestamped
+# at 2.7s -- lyrics visibly leading the actual singing by ~1s for the whole song). Re-anchor the
+# fetched timestamps to this audio's own measured vocal onset rather than trusting them as-is.
+_ONSET_STEP_SECONDS = 0.05
+_ONSET_WINDOW_SECONDS = 0.2
+_ONSET_RMS_GATE = 0.01  # same silence/singing-energy gate family as melody_extraction's own
+_ONSET_SEARCH_MARGIN_SECONDS = 10.0  # keep searching this far past the reported first-word time too, in case the fetched timestamps run late rather than early
+_ONSET_MIN_SEARCH_SECONDS = 20.0
+# Below this, treat the discrepancy as ordinary word-lead (consonant before voiced pitch, etc.)
+# rather than a real intro-length mismatch, and leave the fetched timestamps alone.
+_MIN_CORRECTION_SECONDS = 0.35
+# A larger implied shift is more likely a bad onset detection (an early breath, percussion bleed)
+# than a genuine intro mismatch -- safer to leave the fetched timestamps uncorrected than risk
+# shifting a whole song's lyrics on a false signal.
+_MAX_CORRECTION_SECONDS = 15.0
+
+
+def _find_first_vocal_onset(audio, sampling_rate: int, search_seconds: float) -> float | None:
+    """First time offset where the vocal stem has sustained singing-level energy, or ``None`` if
+    none is found before ``search_seconds``.
+    """
+    t = 0.0
+    while t + _ONSET_WINDOW_SECONDS <= search_seconds:
+        if _rms(audio, sampling_rate, t, t + _ONSET_WINDOW_SECONDS) >= _ONSET_RMS_GATE:
+            return t
+        t += _ONSET_STEP_SECONDS
+    return None
+
+
+def _align_synced_lyrics_to_audio(
+    words: list[dict],
+    background_ranges: list[tuple[float, float]],
+    vocal_stem_path: Path,
+) -> tuple[list[dict], list[tuple[float, float]]]:
+    """Shift lrclib-fetched ``words`` (and their matching ``background_ranges``, see
+    ``lyrics_lookup.fetch_synced_lyrics``) so the first word lines up with this audio's own measured
+    vocal onset, correcting for an intro-length mismatch between whatever release lrclib timed its
+    lines against and this specific source video (see module comment above ``_ONSET_STEP_SECONDS``).
+    """
+    if not words:
+        return words, background_ranges
+
+    audio, sampling_rate = sf.read(vocal_stem_path)
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    audio_duration = len(audio) / sampling_rate
+
+    search_seconds = min(
+        audio_duration, max(_ONSET_MIN_SEARCH_SECONDS, words[0]["start"] + _ONSET_SEARCH_MARGIN_SECONDS)
+    )
+    detected_onset = _find_first_vocal_onset(audio, sampling_rate, search_seconds)
+    if detected_onset is None:
+        return words, background_ranges
+
+    offset = detected_onset - words[0]["start"]
+    if abs(offset) < _MIN_CORRECTION_SECONDS or abs(offset) > _MAX_CORRECTION_SECONDS:
+        return words, background_ranges
+
+    shifted_words = [
+        {**word, "start": round(max(0.0, word["start"] + offset), 4), "end": round(max(0.0, word["end"] + offset), 4)}
+        for word in words
+    ]
+    shifted_ranges = [
+        (round(max(0.0, start + offset), 4), round(max(0.0, end + offset), 4))
+        for start, end in background_ranges
+    ]
+    return shifted_words, shifted_ranges
+
+
 def _normalize_word(text: str) -> str:
     """Lowercased, trailing-punctuation-stripped form used only to compare
     two transcriptions of "the same word" -- e.g. a re-detected anchor can
@@ -317,7 +402,8 @@ def extract_lyrics(
     tracking chunk-by-chunk transcription progress (reserving the last 5%
     for the gap-repair pass) when it falls back to local transcription.
 
-    Returns a ``LyricsResult`` with the path to the saved file.
+    Returns a ``LyricsResult`` with the path to the saved file and any backing/ad-lib-vocal time
+    ranges stripped out of it (see ``LyricsResult.background_vocal_ranges``).
     """
     if language is not None and language not in _SUPPORTED_LANGUAGES:
         raise ValueError(
@@ -329,14 +415,22 @@ def extract_lyrics(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     words = None
+    background_ranges: list[tuple[float, float]] = []
     if lyrics_query:
         duration_seconds = sf.info(str(vocal_stem_path)).duration
-        words = fetch_synced_lyrics(lyrics_query, duration_seconds=duration_seconds)
-        if words is not None and on_progress:
-            on_progress(1.0)
+        fetched = fetch_synced_lyrics(lyrics_query, duration_seconds=duration_seconds)
+        if fetched is not None:
+            words, background_ranges = fetched
+            words, background_ranges = _align_synced_lyrics_to_audio(
+                words, background_ranges, vocal_stem_path
+            )
+            if on_progress:
+                on_progress(1.0)
 
     if words is None:
-        model = WhisperModel(_MODEL_SIZE, device="cpu", compute_type="int8")
+        device = get_device()
+        compute_type = "float16" if device == "cuda" else "int8"
+        model = WhisperModel(_MODEL_SIZE, device=device, compute_type=compute_type)
         audio = decode_audio(
             str(vocal_stem_path), sampling_rate=model.feature_extractor.sampling_rate
         )
@@ -356,4 +450,4 @@ def extract_lyrics(
     lyrics_path = output_dir / f"{vocal_stem_path.stem}_lyrics.json"
     lyrics_path.write_text(json.dumps(words, indent=2))
 
-    return LyricsResult(lyrics_path=lyrics_path)
+    return LyricsResult(lyrics_path=lyrics_path, background_vocal_ranges=background_ranges)
