@@ -1,0 +1,288 @@
+"""Tests for the job server's GET/DELETE /api/songs endpoints (the "song
+library").
+
+``scripts/server.py`` has no package ``__init__.py``, so it's imported here
+the same way it resolves its own sibling imports at runtime: by inserting
+``scripts/`` onto ``sys.path`` first. Driven through FastAPI's ``TestClient``
+rather than spinning up a real HTTP server.
+"""
+import json
+import sys
+import threading
+from pathlib import Path
+
+import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+
+import server  # noqa: E402
+
+client = TestClient(server.app)
+
+
+def test_list_songs_returns_empty_when_nothing_published(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(server, "PUBLIC_DIR", tmp_path / "public")
+
+    response = client.get("/api/songs")
+
+    assert response.status_code == 200
+    assert response.json() == {"songs": []}
+
+
+def test_list_songs_skips_unpublished_and_reads_title_from_meta(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    public_dir = tmp_path / "public"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    monkeypatch.setattr(server, "PUBLIC_DIR", public_dir)
+
+    published_dir = public_dir / "my-song"
+    published_dir.mkdir(parents=True)
+    (published_dir / "notes.json").write_text("[]")
+
+    # Has a public dir but never finished publishing (no notes.json yet) --
+    # shouldn't show up as playable.
+    unpublished_dir = public_dir / "half-done"
+    unpublished_dir.mkdir(parents=True)
+
+    meta_dir = cache_dir / "my-song"
+    meta_dir.mkdir(parents=True)
+    (meta_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "title": "My Song",
+                "song_id": "my-song",
+                "processed_at": "2026-07-28T00:00:00+00:00",
+            }
+        )
+    )
+
+    response = client.get("/api/songs")
+
+    assert response.status_code == 200
+    assert response.json()["songs"] == [
+        {"slug": "my-song", "title": "My Song", "processed_at": "2026-07-28T00:00:00+00:00"}
+    ]
+
+
+def test_list_songs_falls_back_to_slug_when_meta_is_missing(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    public_dir = tmp_path / "public"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    monkeypatch.setattr(server, "PUBLIC_DIR", public_dir)
+
+    # A song published via the old process_song.py/publish_song.py CLI path,
+    # from before meta.json gained a "title" field.
+    published_dir = public_dir / "old-cli-song"
+    published_dir.mkdir(parents=True)
+    (published_dir / "notes.json").write_text("[]")
+
+    response = client.get("/api/songs")
+
+    assert response.json()["songs"] == [
+        {"slug": "old-cli-song", "title": "old-cli-song", "processed_at": None}
+    ]
+
+
+def test_delete_song_removes_public_and_cache_dirs(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    public_dir = tmp_path / "public"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    monkeypatch.setattr(server, "PUBLIC_DIR", public_dir)
+
+    published_dir = public_dir / "my-song"
+    published_dir.mkdir(parents=True)
+    (published_dir / "notes.json").write_text("[]")
+    meta_dir = cache_dir / "my-song"
+    meta_dir.mkdir(parents=True)
+    (meta_dir / "meta.json").write_text(json.dumps({"title": "My Song"}))
+
+    response = client.delete("/api/songs/my-song")
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": "my-song"}
+    assert not published_dir.exists()
+    assert not meta_dir.exists()
+    assert client.get("/api/songs").json()["songs"] == []
+
+
+def test_delete_song_is_idempotent_about_a_missing_cache_dir(tmp_path, monkeypatch):
+    """The raw CACHE_DIR copy can be absent (e.g. already cleaned up by hand)
+    even though the song is still published -- deleting shouldn't 500."""
+    cache_dir = tmp_path / "cache"
+    public_dir = tmp_path / "public"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    monkeypatch.setattr(server, "PUBLIC_DIR", public_dir)
+
+    published_dir = public_dir / "my-song"
+    published_dir.mkdir(parents=True)
+    (published_dir / "notes.json").write_text("[]")
+
+    response = client.delete("/api/songs/my-song")
+
+    assert response.status_code == 200
+    assert not published_dir.exists()
+
+
+def test_delete_song_404s_for_unknown_slug(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(server, "PUBLIC_DIR", tmp_path / "public")
+
+    response = client.delete("/api/songs/does-not-exist")
+
+    assert response.status_code == 404
+
+
+def test_song_dir_rejects_a_slug_that_resolves_above_base(tmp_path):
+    """Unit-level check for the guard `delete_song` relies on: a literal "/"
+    in the slug can't even reach that route (FastAPI's default path
+    converter only matches one segment, so Starlette 404s those before our
+    handler runs), but ".." alone *is* a single segment, and a raw,
+    non-normalizing HTTP client could send it verbatim -- unlike httpx,
+    which collapses ".." out of the URL client-side before we'd ever see it,
+    making that specific case untestable through the route itself.
+    """
+    base = tmp_path / "public"
+    base.mkdir()
+
+    with pytest.raises(HTTPException) as exc_info:
+        server._song_dir(base, "..")
+
+    assert exc_info.value.status_code == 400
+
+
+def test_song_dir_rejects_a_windows_backslash_escape(tmp_path):
+    """FastAPI's path converter only blocks a literal "/", not "\\" -- on
+    Windows, pathlib treats a backslash as a separator too, so a slug like
+    "..\\sibling" is one URL path segment (reaches the route fine) but two
+    filesystem path components (escapes `base`) unless guarded against.
+    """
+    base = tmp_path / "public"
+    base.mkdir()
+
+    with pytest.raises(HTTPException) as exc_info:
+        server._song_dir(base, "..\\sibling")
+
+    assert exc_info.value.status_code == 400
+
+
+def test_run_job_serializes_concurrent_requests_for_the_same_song(tmp_path, monkeypatch):
+    """Regression test for a real bug: two /api/jobs requests for the same
+    song that overlap in time both used to run the full pipeline against the
+    same deterministic intermediate filenames inside the same cache/<slug>/
+    dir (extract_audio/separate_stems name their outputs from the source
+    video id, not per-job) -- whichever finished first renamed those shared
+    files to their final cache names out from under the other, crashing it
+    with "[WinError 2] ... instrumental.wav" partway through its own rename.
+    _run_job now serializes per slug so a second overlapping request waits,
+    then finds the cache already warm and skips reprocessing entirely.
+    """
+    cache_dir = tmp_path / "cache"
+    public_dir = tmp_path / "public"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    monkeypatch.setattr(server, "PUBLIC_DIR", public_dir)
+    monkeypatch.setattr(server, "_SLUG_LOCKS", {})
+
+    call_count = {"n": 0}
+    entered_process_song = threading.Event()
+    release_process_song = threading.Event()
+
+    def fake_probe_title(url):
+        return "My Song"
+
+    def fake_download_audio(url, output_dir, on_progress=None):
+        return Path(output_dir) / "video.mp4", "My Song"
+
+    def fake_process_song(video_path, cache_dir, song_id, on_progress, language, lyrics_query):
+        call_count["n"] += 1
+        entered_process_song.set()
+        assert release_process_song.wait(timeout=5), "test deadlocked waiting to be released"
+        song_cache_dir = Path(cache_dir) / song_id
+        song_cache_dir.mkdir(parents=True, exist_ok=True)
+        (song_cache_dir / "instrumental.wav").write_bytes(b"fake wav data")
+        (song_cache_dir / "notes.json").write_text("[]")
+        (song_cache_dir / "lyrics.json").write_text("[]")
+        (song_cache_dir / "meta.json").write_text(
+            json.dumps({"song_id": song_id, "processed_at": "2026-07-28T00:00:00+00:00"})
+        )
+
+    monkeypatch.setattr(server, "probe_title", fake_probe_title)
+    monkeypatch.setattr(server, "download_audio", fake_download_audio)
+    monkeypatch.setattr(server, "process_song", fake_process_song)
+
+    job1 = server.Job(id="job-1", url="https://example.com/watch?v=abc")
+    job2 = server.Job(id="job-2", url="https://example.com/watch?v=abc")
+
+    thread1 = threading.Thread(target=server._run_job, args=(job1,))
+    thread1.start()
+    assert entered_process_song.wait(timeout=5), "job1 never reached process_song"
+
+    thread2 = threading.Thread(target=server._run_job, args=(job2,))
+    thread2.start()
+    # Give job2 every chance to (wrongly) start its own concurrent
+    # process_song call while job1 is still mid-flight, before releasing it.
+    thread2.join(timeout=0.3)
+    assert call_count["n"] == 1, "job2 started processing concurrently instead of waiting"
+
+    release_process_song.set()
+    thread1.join(timeout=5)
+    thread2.join(timeout=5)
+
+    assert call_count["n"] == 1  # job2 found the cache warm and skipped reprocessing
+    assert job1.status == "done"
+    assert job2.status == "done"
+    assert job1.slug == job2.slug == "my-song"
+
+
+def test_overall_progress_maps_stage_fraction_into_its_weighted_span():
+    assert server._overall_progress("separating", 0.0) == pytest.approx(0.05)
+    assert server._overall_progress("separating", 1.0) == pytest.approx(0.30)
+    assert server._overall_progress("transcribing_lyrics", 0.5) == pytest.approx(0.625)
+    assert server._overall_progress("done", 0.0) == pytest.approx(1.0)
+
+
+def test_overall_progress_clamps_out_of_range_fractions():
+    assert server._overall_progress("separating", -1.0) == pytest.approx(0.05)
+    assert server._overall_progress("separating", 5.0) == pytest.approx(0.30)
+
+
+def test_run_job_reports_real_progress_and_reaches_1_on_success(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    public_dir = tmp_path / "public"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    monkeypatch.setattr(server, "PUBLIC_DIR", public_dir)
+    monkeypatch.setattr(server, "_SLUG_LOCKS", {})
+
+    def fake_probe_title(url):
+        return "My Song"
+
+    def fake_download_audio(url, output_dir, on_progress=None):
+        if on_progress:
+            on_progress(0.5)
+        return Path(output_dir) / "video.mp4", "My Song"
+
+    def fake_process_song(video_path, cache_dir, song_id, on_progress, language, lyrics_query):
+        on_progress("separating", 1.0)
+        on_progress("transcribing_lyrics", 0.5)
+        song_cache_dir = Path(cache_dir) / song_id
+        song_cache_dir.mkdir(parents=True, exist_ok=True)
+        (song_cache_dir / "instrumental.wav").write_bytes(b"fake wav data")
+        (song_cache_dir / "notes.json").write_text("[]")
+        (song_cache_dir / "lyrics.json").write_text("[]")
+        (song_cache_dir / "meta.json").write_text(
+            json.dumps({"song_id": song_id, "processed_at": "2026-07-28T00:00:00+00:00"})
+        )
+
+    monkeypatch.setattr(server, "probe_title", fake_probe_title)
+    monkeypatch.setattr(server, "download_audio", fake_download_audio)
+    monkeypatch.setattr(server, "process_song", fake_process_song)
+    monkeypatch.setattr(server, "publish_song", lambda slug, cache_dir, public_dir: None)
+
+    job = server.Job(id="job-1", url="https://example.com/watch?v=abc")
+    server._run_job(job)
+
+    assert job.status == "done"
+    assert job.progress == 1.0
+    assert job.slug == "my-song"
