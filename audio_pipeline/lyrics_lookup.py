@@ -17,18 +17,48 @@ import re
 
 import requests
 
+from audio_pipeline.text_script import is_mostly_supported_script
+
 _SEARCH_URL = "https://lrclib.net/api/search"
 _REQUEST_TIMEOUT_SECONDS = 10
 _FALLBACK_LAST_LINE_DURATION_SECONDS = 4.0
 
-_LRC_LINE_RE = re.compile(r"^\[(\d{1,3}):(\d{2}(?:\.\d{1,3})?)\](.*)$")
+# lrclib only tells us when a line *starts*; naively treating "the next
+# line's start" as "this line's end" is fine back-to-back, but any pause
+# before that next line -- a held note trailing into silence, an
+# instrumental break -- then gets counted as this line's own singing time
+# and distributed across its words, so a short line's fill animation
+# crawls on for the length of the following gap instead of finishing when
+# it's actually done. Cap a line's assumed duration to something plausible
+# for its own text length instead of trusting an arbitrarily long gap.
+_MAX_SECONDS_PER_CHAR = 0.5
+
+_LRC_TAG_RE = re.compile(r"^\[(\d{1,3}):(\d{2}(?:\.\d{1,3})?)\]")
 _CJK_RE = re.compile("[一-鿿]")
 
+# lrclib's plain-text lines routinely include the backing/ad-lib vocal alongside the lead line
+# (e.g. "that I fell for you (mm-hmm)"), or as an entire line of its own (e.g. "(I hope it's worth
+# it)") -- these are not what the player is meant to sing, so they're stripped out of the displayed
+# lyrics entirely. Matches both parenthesized and square-bracketed spans (either convention shows up
+# depending on the source release), non-nested.
+_BACKGROUND_VOCAL_RE = re.compile(r"[(\[][^)\]]*[)\]]")
 
-def fetch_synced_lyrics(query: str, duration_seconds: float | None = None) -> list[dict] | None:
+
+def _strip_background_vocals(text: str) -> str:
+    stripped = _BACKGROUND_VOCAL_RE.sub(" ", text)
+    return re.sub(r"\s+", " ", stripped).strip()
+
+
+def fetch_synced_lyrics(
+    query: str, duration_seconds: float | None = None
+) -> tuple[list[dict], list[tuple[float, float]]] | None:
     """Look up ``query`` (e.g. a song title) on lrclib.net and return a word
     list in the same shape ``lyrics_extraction._flatten_words`` produces:
-    ``[{"word", "start", "end", "line"}, ...]``.
+    ``[{"word", "start", "end", "line"}, ...]``, alongside a list of
+    ``(start, end)`` time ranges that were entirely backing/ad-lib vocals
+    (see ``_strip_background_vocals``) -- callers should exclude these same
+    ranges from anything else derived from this song's timing, e.g. the note
+    highway, since they aren't part of the line the player is meant to sing.
 
     ``duration_seconds``, if given, is used to prefer the search result
     closest in length to the actual audio, since title search alone can
@@ -55,38 +85,68 @@ def fetch_synced_lyrics(query: str, duration_seconds: float | None = None) -> li
     if not synced:
         return None
 
-    words = _words_from_lrc(synced)
-    return words or None
+    words, background_ranges = _words_from_lrc(synced)
+    if not words:
+        return None
+    return words, background_ranges
 
 
 def _pick_best_synced_lyrics(results: list[dict], duration_seconds: float | None) -> str | None:
+    """Pick the closest-duration candidate whose lyrics are actually in one
+    of the two scripts this app supports.
+
+    lrclib matches by title text only, so a same/similar-titled song in a
+    completely different language (e.g. Thai) can be the closest-duration
+    result -- walk candidates in closest-duration order and skip any whose
+    lyrics are predominantly a wrong script, rather than trusting the single
+    closest match and returning known-wrong-language lyrics verbatim.
+    """
     candidates = [r for r in results if r.get("syncedLyrics")]
-    if not candidates:
-        return None
-    if duration_seconds is None:
-        return candidates[0]["syncedLyrics"]
-    best = min(
-        candidates,
-        key=lambda r: abs((r.get("duration") or 0) - duration_seconds),
-    )
-    return best["syncedLyrics"]
+    if duration_seconds is not None:
+        candidates = sorted(
+            candidates, key=lambda r: abs((r.get("duration") or 0) - duration_seconds)
+        )
+    for candidate in candidates:
+        lyrics = candidate["syncedLyrics"]
+        if is_mostly_supported_script(lyrics):
+            return lyrics
+    return None
 
 
 def _parse_lrc(lrc_text: str) -> list[tuple[float, str]]:
     """Parse standard ``[mm:ss.xx]text`` synced-lyrics lines, skipping
     metadata tags (``[ar:...]``, ``[offset:...]``, etc.) and blank lines.
+
+    A single line can carry more than one timestamp tag (e.g.
+    ``[01:02.34][03:45.67]Some lyrics``) -- lrclib's convention for a line
+    that recurs verbatim, such as a repeated chorus, instead of duplicating
+    the text. Each leading tag produces its own ``(timestamp, text)`` entry
+    sharing that same text, since otherwise every occurrence but the first
+    would be silently dropped -- leaving that whole repeat of the song with
+    no lyric data, and the line's stray second tag rendered as literal text.
+    Entries are re-sorted by timestamp afterward, since a repeated line's
+    later occurrence is written inline with its first rather than at its own
+    position in the file.
     """
     lines = []
     for raw_line in lrc_text.splitlines():
-        match = _LRC_LINE_RE.match(raw_line.strip())
-        if not match:
+        remainder = raw_line.strip()
+        timestamps = []
+        while True:
+            match = _LRC_TAG_RE.match(remainder)
+            if not match:
+                break
+            minutes, seconds = match.groups()
+            timestamps.append(int(minutes) * 60 + float(seconds))
+            remainder = remainder[match.end():]
+        if not timestamps:
             continue
-        text = match.group(3).strip()
+        text = remainder.strip()
         if not text:
             continue
-        minutes, seconds = match.groups()[0], match.groups()[1]
-        timestamp = int(minutes) * 60 + float(seconds)
-        lines.append((timestamp, text))
+        for timestamp in timestamps:
+            lines.append((timestamp, text))
+    lines.sort(key=lambda entry: entry[0])
     return lines
 
 
@@ -122,20 +182,30 @@ def _distribute_words(
     return out
 
 
-def _words_from_lrc(lrc_text: str) -> list[dict]:
+def _words_from_lrc(lrc_text: str) -> tuple[list[dict], list[tuple[float, float]]]:
     parsed_lines = _parse_lrc(lrc_text)
     words = []
+    background_ranges: list[tuple[float, float]] = []
     line = 0
-    for i, (start, text) in enumerate(parsed_lines):
-        end = (
-            parsed_lines[i + 1][0]
-            if i + 1 < len(parsed_lines)
-            else start + _FALLBACK_LAST_LINE_DURATION_SECONDS
-        )
+    for i, (start, raw_text) in enumerate(parsed_lines):
+        next_start = parsed_lines[i + 1][0] if i + 1 < len(parsed_lines) else None
+        end = next_start if next_start is not None else start + _FALLBACK_LAST_LINE_DURATION_SECONDS
+
+        text = _strip_background_vocals(raw_text)
         tokens = _tokenize_line(text)
         if not tokens:
+            # A line that had real text but nothing left after stripping backing/ad-lib
+            # vocals (e.g. "(I hope it's worth it)") was entirely background -- exclude its
+            # whole span from anything else derived from this song's timing too, not just
+            # the displayed lyrics.
+            if _tokenize_line(raw_text):
+                background_ranges.append((start, end))
             continue
+        if next_start is not None:
+            total_chars = sum(len(token) for token in tokens) or len(tokens)
+            max_plausible_end = start + total_chars * _MAX_SECONDS_PER_CHAR
+            end = min(next_start, max_plausible_end)
         for word, word_start, word_end in _distribute_words(tokens, start, end):
             words.append({"word": word, "start": word_start, "end": word_end, "line": line})
         line += 1
-    return words
+    return words, background_ranges

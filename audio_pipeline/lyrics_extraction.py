@@ -262,6 +262,25 @@ _MIN_CORRECTION_SECONDS = 0.35
 # shifting a whole song's lyrics on a false signal.
 _MAX_CORRECTION_SECONDS = 15.0
 
+# A constant-offset shift (above) only fixes a mismatched intro length -- it assumes lrclib's line
+# timing otherwise runs at the *same pace* as this video throughout. Reported symptom that doesn't
+# fit that model: lyrics drifting further behind as the song goes on ("the song is faster than the
+# lyrics"), which a single offset can't produce or fix -- that shape only comes from a genuine
+# tempo/pacing mismatch between whatever release lrclib timed (a different edit, a slightly
+# different mix speed) and this specific video. Fix: also detect the *last* moment the vocal stem
+# has real singing energy, near the reported last word's end, and fit a two-point affine map
+# (scale + offset) between (first word start -> first detected onset) and (last word end -> last
+# detected activity) instead of assuming scale=1. A single offset is still the right model when the
+# two-point fit isn't trustworthy (see `_fit_time_correction`), so that path is kept as the fallback
+# rather than replaced.
+_LAST_ACTIVITY_SEARCH_MARGIN_SECONDS = 15.0
+# A real tempo mismatch between two releases of the same song is a small percentage, not a gross
+# difference -- bound the fitted scale to a generous-but-sane band so a bad end-of-song detection
+# (trailing applause/chatter read as "still singing", a mistimed last line) can't silently stretch
+# the whole song's lyrics into nonsense. Outside this band, fall back to the single-offset model.
+_MIN_PLAUSIBLE_SCALE = 0.9
+_MAX_PLAUSIBLE_SCALE = 1.1
+
 
 def _find_first_vocal_onset(audio, sampling_rate: int, search_seconds: float) -> float | None:
     """First time offset where the vocal stem has sustained singing-level energy, or ``None`` if
@@ -275,15 +294,61 @@ def _find_first_vocal_onset(audio, sampling_rate: int, search_seconds: float) ->
     return None
 
 
+def _find_last_vocal_activity(
+    audio, sampling_rate: int, search_start_seconds: float
+) -> float | None:
+    """Last time offset (window end) where the vocal stem still has sustained singing-level energy,
+    scanning from ``search_start_seconds`` to the end of the audio -- the mirror of
+    `_find_first_vocal_onset`, used to anchor the *end* of the fetched lyrics' timing to this
+    audio's actual last sung moment instead of trusting the reported end. Returns ``None`` if no
+    singing-level energy is found anywhere in that span.
+    """
+    duration = len(audio) / sampling_rate
+    t = max(0.0, search_start_seconds)
+    last_active_end = None
+    while t + _ONSET_WINDOW_SECONDS <= duration:
+        if _rms(audio, sampling_rate, t, t + _ONSET_WINDOW_SECONDS) >= _ONSET_RMS_GATE:
+            last_active_end = t + _ONSET_WINDOW_SECONDS
+        t += _ONSET_STEP_SECONDS
+    return last_active_end
+
+
+def _fit_time_correction(
+    first_reported: float,
+    first_detected: float,
+    last_reported: float,
+    last_detected: float | None,
+) -> tuple[float, float]:
+    """Fit ``(scale, offset)`` so ``true_time = scale * reported_time + offset``, anchored at the
+    first word's onset and, when available and trustworthy, also the last word's end -- so a
+    genuine tempo/pacing drift across the song is corrected proportionally instead of assuming a
+    single constant shift applies everywhere (see the module comment above
+    ``_LAST_ACTIVITY_SEARCH_MARGIN_SECONDS``).
+
+    Falls back to a pure offset (``scale=1``) whenever the last-word anchor is missing, the two
+    reported timestamps are too close together for a stable slope estimate, or the fitted scale
+    falls outside the plausible band -- a bad two-point fit is worse than no fit at all.
+    """
+    span = last_reported - first_reported
+    if last_detected is not None and span > _ONSET_WINDOW_SECONDS:
+        scale = (last_detected - first_detected) / span
+        if _MIN_PLAUSIBLE_SCALE <= scale <= _MAX_PLAUSIBLE_SCALE:
+            offset = first_detected - scale * first_reported
+            return scale, offset
+
+    return 1.0, first_detected - first_reported
+
+
 def _align_synced_lyrics_to_audio(
     words: list[dict],
     background_ranges: list[tuple[float, float]],
     vocal_stem_path: Path,
 ) -> tuple[list[dict], list[tuple[float, float]]]:
-    """Shift lrclib-fetched ``words`` (and their matching ``background_ranges``, see
-    ``lyrics_lookup.fetch_synced_lyrics``) so the first word lines up with this audio's own measured
-    vocal onset, correcting for an intro-length mismatch between whatever release lrclib timed its
-    lines against and this specific source video (see module comment above ``_ONSET_STEP_SECONDS``).
+    """Re-anchor lrclib-fetched ``words`` (and their matching ``background_ranges``, see
+    ``lyrics_lookup.fetch_synced_lyrics``) to this audio's own measured vocal timing, correcting for
+    both an intro-length mismatch and a proportional tempo/pacing drift between whatever release
+    lrclib timed its lines against and this specific source video (see the module comment above
+    ``_ONSET_STEP_SECONDS`` and ``_LAST_ACTIVITY_SEARCH_MARGIN_SECONDS``).
     """
     if not words:
         return words, background_ranges
@@ -300,16 +365,28 @@ def _align_synced_lyrics_to_audio(
     if detected_onset is None:
         return words, background_ranges
 
-    offset = detected_onset - words[0]["start"]
-    if abs(offset) < _MIN_CORRECTION_SECONDS or abs(offset) > _MAX_CORRECTION_SECONDS:
+    last_word_end = words[-1]["end"]
+    last_search_start = max(0.0, last_word_end - _LAST_ACTIVITY_SEARCH_MARGIN_SECONDS)
+    detected_last_activity = _find_last_vocal_activity(audio, sampling_rate, last_search_start)
+
+    scale, offset = _fit_time_correction(
+        words[0]["start"], detected_onset, last_word_end, detected_last_activity
+    )
+
+    implied_start_shift = scale * words[0]["start"] + offset - words[0]["start"]
+    if abs(implied_start_shift) < _MIN_CORRECTION_SECONDS or abs(implied_start_shift) > _MAX_CORRECTION_SECONDS:
         return words, background_ranges
 
     shifted_words = [
-        {**word, "start": round(max(0.0, word["start"] + offset), 4), "end": round(max(0.0, word["end"] + offset), 4)}
+        {
+            **word,
+            "start": round(max(0.0, scale * word["start"] + offset), 4),
+            "end": round(max(0.0, scale * word["end"] + offset), 4),
+        }
         for word in words
     ]
     shifted_ranges = [
-        (round(max(0.0, start + offset), 4), round(max(0.0, end + offset), 4))
+        (round(max(0.0, scale * start + offset), 4), round(max(0.0, scale * end + offset), 4))
         for start, end in background_ranges
     ]
     return shifted_words, shifted_ranges

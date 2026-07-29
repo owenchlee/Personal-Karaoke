@@ -15,7 +15,11 @@ import soundfile as sf
 from faster_whisper.transcribe import Segment, Word
 
 from audio_pipeline.lyrics_extraction import (
+    _align_synced_lyrics_to_audio,
     _detect_language,
+    _find_first_vocal_onset,
+    _find_last_vocal_activity,
+    _fit_time_correction,
     _flatten_words,
     _repair_energetic_gaps,
     _transcribe_chunked,
@@ -129,6 +133,40 @@ def test_flatten_words_drops_zero_duration_words_as_hallucination_artifacts():
     result = _flatten_words(segments)
 
     assert result == [{"word": "real", "start": 0.0, "end": 0.3, "line": 0}]
+
+
+def test_flatten_words_drops_words_hallucinated_in_an_unsupported_script():
+    # Observed in practice: even with transcription forced to "yue", a
+    # low-confidence chunk can still come back with stray Thai text instead
+    # of Cantonese -- whisper's `language=` argument only sets the decoder's
+    # initial token, it doesn't hard-constrain every token after that.
+    segments = [
+        _segment(
+            [
+                _word(" real", 0.0, 0.3),
+                _word(" สวัสดี", 0.3, 0.6),
+                _word(" word", 0.6, 0.9),
+            ]
+        ),
+    ]
+
+    result = _flatten_words(segments)
+
+    assert result == [
+        {"word": "real", "start": 0.0, "end": 0.3, "line": 0},
+        {"word": "word", "start": 0.6, "end": 0.9, "line": 0},
+    ]
+
+
+def test_flatten_words_keeps_cantonese_words():
+    segments = [_segment([_word(" 愛你", 0.0, 0.3), _word(" 喇", 0.3, 0.6)])]
+
+    result = _flatten_words(segments)
+
+    assert result == [
+        {"word": "愛你", "start": 0.0, "end": 0.3, "line": 0},
+        {"word": "喇", "start": 0.3, "end": 0.6, "line": 0},
+    ]
 
 
 def test_flatten_words_does_not_reserve_a_line_number_for_all_zero_duration_segments():
@@ -334,6 +372,175 @@ def _write_synthetic_wav(path, duration_s=2.0, samplerate=16000, freq_hz=220.0):
     sf.write(path, tone.astype(np.float32), samplerate)
 
 
+def _write_wav_with_silence_then_tone(
+    path, silence_s, tone_s, samplerate=16000, freq_hz=220.0, amplitude=0.3
+):
+    silence = np.zeros(int(silence_s * samplerate), dtype=np.float32)
+    t = np.linspace(0, tone_s, int(tone_s * samplerate), endpoint=False)
+    tone = (amplitude * np.sin(2 * np.pi * freq_hz * t)).astype(np.float32)
+    sf.write(path, np.concatenate([silence, tone]), samplerate)
+
+
+def test_align_synced_lyrics_shifts_words_to_match_real_vocal_onset(tmp_path):
+    # Reproduces the real bug: lrclib's fetched timestamps assume singing starts at 0.5s, but this
+    # video's own vocal stem has no energy until 2.0s -- the lyrics should be re-anchored to the
+    # audio's actual onset, not trusted as-is.
+    vocal_path = tmp_path / "vocals.wav"
+    _write_wav_with_silence_then_tone(vocal_path, silence_s=2.0, tone_s=1.0)
+    words = [
+        {"word": "early", "start": 0.5, "end": 0.8, "line": 0},
+        {"word": "word", "start": 0.8, "end": 1.1, "line": 0},
+    ]
+
+    words_result, ranges_result = _align_synced_lyrics_to_audio(words, [(0.5, 0.8)], vocal_path)
+
+    assert words_result[0]["start"] == pytest.approx(1.85, abs=1e-6)
+    assert words_result[1]["start"] == pytest.approx(2.15, abs=1e-6)
+    # relative spacing between words is preserved -- only the whole set shifts
+    assert words_result[1]["start"] - words_result[0]["start"] == pytest.approx(
+        words[1]["start"] - words[0]["start"], abs=1e-6
+    )
+    # background-vocal ranges shift by the same offset as the words
+    assert ranges_result[0][0] == pytest.approx(1.85, abs=1e-6)
+    assert ranges_result[0][1] == pytest.approx(2.15, abs=1e-6)
+
+
+def test_align_synced_lyrics_leaves_small_mismatch_untouched(tmp_path):
+    vocal_path = tmp_path / "vocals.wav"
+    _write_wav_with_silence_then_tone(vocal_path, silence_s=0.0, tone_s=1.0)
+    words = [{"word": "hi", "start": 0.1, "end": 0.4, "line": 0}]
+
+    words_result, ranges_result = _align_synced_lyrics_to_audio(words, [], vocal_path)
+
+    assert words_result == words
+    assert ranges_result == []
+
+
+def test_align_synced_lyrics_leaves_an_implausibly_large_offset_untouched(tmp_path):
+    # An 18s implied shift is more likely a bad onset detection than a genuine intro mismatch --
+    # safer to leave the fetched timestamps alone than risk a wrong correction.
+    vocal_path = tmp_path / "vocals.wav"
+    _write_wav_with_silence_then_tone(vocal_path, silence_s=18.0, tone_s=1.0)
+    words = [{"word": "hi", "start": 0.0, "end": 0.3, "line": 0}]
+
+    words_result, ranges_result = _align_synced_lyrics_to_audio(words, [], vocal_path)
+
+    assert words_result == words
+    assert ranges_result == []
+
+
+def test_align_synced_lyrics_leaves_words_untouched_when_no_vocal_energy_found(tmp_path):
+    vocal_path = tmp_path / "silence.wav"
+    sf.write(vocal_path, np.zeros(int(2.0 * 16000), dtype=np.float32), 16000)
+    words = [{"word": "hi", "start": 0.5, "end": 0.8, "line": 0}]
+
+    words_result, ranges_result = _align_synced_lyrics_to_audio(words, [], vocal_path)
+
+    assert words_result == words
+    assert ranges_result == []
+
+
+def test_fit_time_correction_scales_and_offsets_when_both_anchors_agree():
+    # A real ~4% tempo drift across a long song: the last-word anchor implies a scale inside the
+    # plausible band, so both anchors should be used rather than falling back to a pure offset.
+    scale, offset = _fit_time_correction(
+        first_reported=1.7, first_detected=2.0, last_reported=100.0, last_detected=103.0
+    )
+
+    assert scale == pytest.approx((103.0 - 2.0) / (100.0 - 1.7), abs=1e-6)
+    assert offset == pytest.approx(2.0 - scale * 1.7, abs=1e-6)
+    # Sanity: applying the fit to both anchors reproduces the detected times exactly.
+    assert scale * 1.7 + offset == pytest.approx(2.0, abs=1e-6)
+    assert scale * 100.0 + offset == pytest.approx(103.0, abs=1e-6)
+
+
+def test_fit_time_correction_falls_back_to_offset_when_last_anchor_missing():
+    scale, offset = _fit_time_correction(
+        first_reported=1.7, first_detected=2.0, last_reported=100.0, last_detected=None
+    )
+
+    assert scale == 1.0
+    assert offset == pytest.approx(2.0 - 1.7, abs=1e-6)
+
+
+def test_fit_time_correction_falls_back_to_offset_when_implied_scale_is_implausible():
+    # A last-detected activity implying a >10% tempo difference is more likely a bad end-of-song
+    # detection (trailing noise, a mistimed last line) than a real drift -- distrust it.
+    scale, offset = _fit_time_correction(
+        first_reported=1.0, first_detected=1.0, last_reported=10.0, last_detected=15.0
+    )
+
+    assert scale == 1.0
+    assert offset == pytest.approx(0.0, abs=1e-6)
+
+
+def test_fit_time_correction_falls_back_to_offset_when_anchors_are_too_close():
+    scale, offset = _fit_time_correction(
+        first_reported=1.0, first_detected=1.2, last_reported=1.1, last_detected=1.3
+    )
+
+    assert scale == 1.0
+    assert offset == pytest.approx(0.2, abs=1e-6)
+
+
+def test_align_synced_lyrics_corrects_proportional_drift_not_just_offset(tmp_path):
+    # Reproduces "the song is faster than the lyrics": a single constant shift can't fix this --
+    # the gap between reported and real time has to grow across the song, i.e. a genuine scale
+    # mismatch, not just a mistimed intro. Real singing: a burst around 20s (the "true" start) and
+    # another around 100s (the "true" end), on a much longer bed of silence than the earlier
+    # silence-then-tone tests use, so the two bursts are unambiguous, independent anchors.
+    samplerate = 16000
+    duration_s = 110.0
+    audio = np.zeros(int(duration_s * samplerate), dtype=np.float32)
+
+    def _write_tone(start_s, length_s, freq_hz=220.0, amplitude=0.3):
+        t = np.linspace(0, length_s, int(length_s * samplerate), endpoint=False)
+        tone = (amplitude * np.sin(2 * np.pi * freq_hz * t)).astype(np.float32)
+        start_sample = int(start_s * samplerate)
+        audio[start_sample : start_sample + len(tone)] = tone
+
+    _write_tone(20.0, 1.0)
+    _write_tone(100.0, 1.0)
+    vocal_path = tmp_path / "vocals.wav"
+    sf.write(vocal_path, audio, samplerate)
+
+    # Independently confirm what the detection helpers actually find for this audio, rather than
+    # hand-predicting the exact RMS-crossing edge (see the sibling silence-then-tone tests for that
+    # style) -- this test is about the *fit* using whatever the real detectors report.
+    detected_onset = _find_first_vocal_onset(audio, samplerate, search_seconds=30.0)
+    detected_last = _find_last_vocal_activity(audio, samplerate, search_start_seconds=85.0)
+    assert detected_onset is not None
+    assert detected_last is not None
+
+    # Reported (fetched) timestamps run increasingly early relative to the real audio -- a lead-in
+    # of 0.6s at the first word growing to a much bigger lead by the last, i.e. the real audio is
+    # "faster" than the reported timing.
+    first_reported = detected_onset - 0.6
+    last_reported = detected_last - 4.0
+    words = [
+        {"word": "start", "start": first_reported, "end": first_reported + 0.3, "line": 0},
+        {"word": "end", "start": last_reported - 0.3, "end": last_reported, "line": 1},
+    ]
+
+    words_result, _ranges = _align_synced_lyrics_to_audio(words, [], vocal_path)
+
+    expected_scale, expected_offset = _fit_time_correction(
+        first_reported, detected_onset, last_reported, detected_last
+    )
+    assert expected_scale != 1.0  # confirms this test actually exercises the proportional-fit path
+    assert words_result[0]["start"] == pytest.approx(
+        expected_scale * first_reported + expected_offset, abs=1e-4
+    )
+    assert words_result[1]["end"] == pytest.approx(
+        expected_scale * last_reported + expected_offset, abs=1e-4
+    )
+    # The whole point: the correction at the end must differ from the correction at the start,
+    # which a constant-offset-only model could never produce.
+    start_correction = words_result[0]["start"] - words[0]["start"]
+    end_correction = words_result[1]["end"] - words[1]["end"]
+    assert start_correction != pytest.approx(end_correction, abs=1e-3)
+
+
 def test_extract_lyrics_produces_readable_json(tmp_path):
     input_path = tmp_path / "synthetic_vocals.wav"
     output_dir = tmp_path / "out"
@@ -366,7 +573,8 @@ def test_extract_lyrics_uses_online_synced_lyrics_when_a_query_is_given(tmp_path
     fake_words = [{"word": "Known", "start": 0.0, "end": 1.0, "line": 0}]
     with (
         patch(
-            "audio_pipeline.lyrics_extraction.fetch_synced_lyrics", return_value=fake_words,
+            "audio_pipeline.lyrics_extraction.fetch_synced_lyrics",
+            return_value=(fake_words, []),
         ) as mock_fetch,
         patch("audio_pipeline.lyrics_extraction.WhisperModel") as mock_model_cls,
     ):
@@ -376,6 +584,28 @@ def test_extract_lyrics_uses_online_synced_lyrics_when_a_query_is_given(tmp_path
     assert mock_fetch.call_args.args[0] == "Some Song Title"
     mock_model_cls.assert_not_called()  # no need to load Whisper when the lookup succeeds
     assert json.loads(result.lyrics_path.read_text()) == fake_words
+    assert result.background_vocal_ranges == []
+
+
+def test_extract_lyrics_exposes_background_vocal_ranges_from_the_synced_lookup(tmp_path):
+    input_path = tmp_path / "synthetic_vocals.wav"
+    output_dir = tmp_path / "out"
+    _write_synthetic_wav(input_path)
+
+    fake_words = [{"word": "Known", "start": 0.0, "end": 1.0, "line": 0}]
+    fake_ranges = [(1.0, 2.0)]
+    with (
+        patch(
+            "audio_pipeline.lyrics_extraction.fetch_synced_lyrics",
+            return_value=(fake_words, fake_ranges),
+        ),
+        patch("audio_pipeline.lyrics_extraction.WhisperModel"),
+    ):
+        result = extract_lyrics(input_path, output_dir, lyrics_query="Some Song Title")
+
+    # The synthetic clip has real energy from t=0, so no onset-alignment shift is expected --
+    # the ranges should pass through unchanged, matching the words they came from.
+    assert result.background_vocal_ranges == fake_ranges
 
 
 def test_extract_lyrics_falls_back_to_transcription_when_lookup_finds_nothing(tmp_path):

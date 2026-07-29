@@ -2,7 +2,7 @@
 
 Usage:
     venv/Scripts/python.exe scripts/process_song.py path/to/video.mp4 [--cache-dir cache]
-        [--song-id my-song] [--force]
+        [--song-id my-song] [--force] [--language {en,yue}] [--lyrics-query "Song Title"]
 """
 import argparse
 import sys
@@ -29,6 +29,15 @@ def main() -> int:
         "--force", action="store_true",
         help="Reprocess even if cached assets already exist for this song",
     )
+    parser.add_argument(
+        "--language", choices=["en", "yue"], default=None,
+        help="Lyrics language (en=English, yue=Cantonese). Default: auto-detect.",
+    )
+    parser.add_argument(
+        "--lyrics-query", type=str, default=None,
+        help="Song title to look up known-correct synced lyrics online before "
+        "falling back to local transcription (default: transcribe only)",
+    )
     args = parser.parse_args()
 
     if not args.input_path.exists():
@@ -38,6 +47,7 @@ def main() -> int:
     start = time.perf_counter()
     assets = process_song(
         args.input_path, cache_dir=args.cache_dir, song_id=args.song_id, force=args.force,
+        language=args.language, lyrics_query=args.lyrics_query,
     )
     elapsed = time.perf_counter() - start
 

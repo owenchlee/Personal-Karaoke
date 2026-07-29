@@ -9,9 +9,18 @@ import json
 
 import numpy as np
 import pretty_midi
+import pytest
 import soundfile as sf
 
-from audio_pipeline.melody_extraction import _enforce_monophony, extract_melody
+from audio_pipeline.melody_extraction import (
+    _collapse_octave_blips,
+    _drop_unconfirmed_pitch_spikes,
+    _enforce_monophony,
+    _pitch_class_distance,
+    _pyin_window,
+    _refine_with_pyin,
+    extract_melody,
+)
 
 # basic-pitch's default minimum/maximum frequency bounds correspond
 # (loosely) to this MIDI range; a plausible sung vocal note should fall
@@ -103,3 +112,279 @@ def test_enforce_monophony_handles_a_three_note_overlap_chain():
     ]
     result = _enforce_monophony(notes)
     assert _no_overlaps(result)
+
+
+def _make_note(pitch_midi, onset, offset, velocity=0.5):
+    return {
+        "pitch_midi": pitch_midi,
+        "pitch_hz": 440.0 * 2 ** ((pitch_midi - 69) / 12),
+        "onset": onset,
+        "offset": offset,
+        "duration": round(offset - onset, 4),
+        "velocity": velocity,
+    }
+
+
+def test_collapse_octave_blips_absorbs_a_touching_octave_jump_and_back():
+    # A held note (pitch 60) basic-pitch chopped into three: itself, a brief octave-up blip, then
+    # itself again, all touching with zero gaps -- the exact artifact _enforce_monophony's own
+    # docstring describes for *overlapping* notes, but here sequential instead.
+    notes = [
+        _make_note(60, 0.0, 1.0),
+        _make_note(72, 1.0, 1.2),
+        _make_note(60, 1.2, 2.0),
+    ]
+    result = _collapse_octave_blips(notes)
+    assert [n["pitch_midi"] for n in result] == [60]
+    assert result[0]["onset"] == 0.0
+    assert result[0]["offset"] == 2.0
+    assert result[0]["duration"] == 2.0
+
+
+def test_collapse_octave_blips_leaves_a_real_silence_gap_alone():
+    # Same pitch pattern, but a real gap before the blip -- basic-pitch detected actual silence
+    # there, so this isn't one continuous vocalization getting mis-chopped; leave it alone.
+    notes = [
+        _make_note(60, 0.0, 1.0),
+        _make_note(72, 1.3, 1.5),
+        _make_note(60, 1.5, 2.0),
+    ]
+    result = _collapse_octave_blips(notes)
+    assert [n["pitch_midi"] for n in result] == [60, 72, 60]
+
+
+def test_collapse_octave_blips_requires_neighbors_to_share_a_pitch_class():
+    # The neighbors themselves are far apart in pitch, so the middle note isn't sandwiched between
+    # two views of "the same real note" -- a real melodic passage, not an artifact.
+    notes = [
+        _make_note(60, 0.0, 1.0),
+        _make_note(72, 1.0, 1.2),
+        _make_note(65, 1.2, 2.0),
+    ]
+    result = _collapse_octave_blips(notes)
+    assert [n["pitch_midi"] for n in result] == [60, 72, 65]
+
+
+def test_collapse_octave_blips_requires_a_large_enough_jump():
+    # Only a small (real, plausible) melodic movement, not the kind of big away-and-back leap
+    # that's the actual octave-confusion signature.
+    notes = [
+        _make_note(60, 0.0, 1.0),
+        _make_note(63, 1.0, 1.2),
+        _make_note(60, 1.2, 2.0),
+    ]
+    result = _collapse_octave_blips(notes)
+    assert [n["pitch_midi"] for n in result] == [60, 63, 60]
+
+
+def test_collapse_octave_blips_leaves_short_note_lists_alone():
+    notes = [_make_note(60, 0.0, 1.0), _make_note(72, 1.0, 1.2)]
+    assert _collapse_octave_blips(notes) == notes
+
+
+def test_collapse_octave_blips_keeps_neighbors_separate_when_not_exactly_equal_pitch():
+    # Neighbors are close enough (within tolerance) to trigger the blip check, but not an exact
+    # pitch match -- absorb the blip into the preceding note, but don't force the two neighbors
+    # into one note; they may be a real, deliberate one-semitone re-attack.
+    notes = [
+        _make_note(60, 0.0, 1.0),
+        _make_note(72, 1.0, 1.2),
+        _make_note(61, 1.2, 2.0),
+    ]
+    result = _collapse_octave_blips(notes)
+    assert [n["pitch_midi"] for n in result] == [60, 61]
+    assert result[0]["offset"] == 1.2
+    assert result[1]["onset"] == 1.2
+
+
+def _harmonic_tone(freq_hz, duration_s, samplerate=22050):
+    # Same synthesis approach as `_write_synthetic_clip` above, but returns the raw array
+    # directly (no file I/O) for feeding straight into `_refine_with_pyin`, which -- like pYIN
+    # itself -- takes an in-memory audio array rather than a path.
+    t = np.linspace(0, duration_s, int(duration_s * samplerate), endpoint=False)
+    tone = np.zeros_like(t)
+    for harmonic, amplitude in enumerate([1.0, 0.5, 0.3, 0.15, 0.08], start=1):
+        tone += amplitude * np.sin(2 * np.pi * freq_hz * harmonic * t)
+    return (0.3 * tone / np.max(np.abs(tone))).astype(np.float32)
+
+
+def test_pitch_class_distance_is_octave_agnostic():
+    assert _pitch_class_distance(60, 60) == 0
+    assert _pitch_class_distance(60, 72) == 0  # exact octave
+    assert _pitch_class_distance(60, 61) == 1
+    assert _pitch_class_distance(60, 65) == 5
+    assert _pitch_class_distance(60, 71) == 1  # wraps the other way around the octave
+
+
+def test_pyin_window_separates_voiced_from_unvoiced_and_counts_total_frames():
+    times = np.array([0.0, 0.1, 0.2, 0.3, 0.4])
+    midi = np.array([60.0, np.nan, 60.5, np.nan, 61.0])
+    voiced, total = _pyin_window(times, midi, 0.0, 0.4)
+    assert total == 4  # frames at t=0.0, 0.1, 0.2, 0.3 fall in [0.0, 0.4)
+    assert list(voiced) == [60.0, 60.5]
+
+
+def test_refine_with_pyin_corrects_a_wrong_octave_and_extends_a_cut_short_offset(tmp_path):
+    samplerate = 22050
+    # A real, continuously-sung note at MIDI 60 (C4, ~261.6Hz) for a full 2s -- but the note event
+    # basic-pitch supposedly reported is an octave too high (72) and cut off after only 1s, the
+    # exact two failure modes measured on the real test song (see `_refine_with_pyin`'s docstring).
+    audio = _harmonic_tone(261.63, duration_s=2.0, samplerate=samplerate)
+    notes = [
+        {
+            "pitch_midi": 72,
+            "pitch_hz": 523.25,
+            "onset": 0.2,
+            "offset": 1.0,
+            "duration": 0.8,
+            "velocity": 0.8,
+        }
+    ]
+
+    refined = _refine_with_pyin(notes, audio, samplerate)
+
+    assert len(refined) == 1
+    assert refined[0]["pitch_midi"] == 60
+    assert refined[0]["pitch_hz"] == pytest.approx(261.63, abs=1.0)
+    # Extended well past the original (wrong) 1.0s offset, since the tone keeps sounding.
+    assert refined[0]["offset"] > 1.3
+    assert refined[0]["duration"] == pytest.approx(refined[0]["offset"] - 0.2)
+
+
+def test_refine_with_pyin_tolerates_a_brief_gap_mid_extension(tmp_path):
+    # A real held note with one short, quiet dropout in the middle (a consonant, a breath) --
+    # exactly the pattern measured on the real test song where a single noisy pYIN frame right
+    # after the reported offset used to kill the whole extension immediately. The singing clearly
+    # resumes moments later, so the extension should bridge the brief gap rather than stopping dead.
+    samplerate = 22050
+    segment = _harmonic_tone(261.63, duration_s=0.6, samplerate=samplerate)
+    gap = np.zeros(int(0.05 * samplerate), dtype=np.float32)
+    audio = np.concatenate([segment, gap, segment])
+    notes = [
+        {"pitch_midi": 60, "pitch_hz": 261.63, "onset": 0.1, "offset": 0.5, "duration": 0.4, "velocity": 0.8},
+    ]
+
+    refined = _refine_with_pyin(notes, audio, samplerate)
+
+    # The note continues (across the brief gap) well past its original 0.5s offset.
+    assert refined[0]["offset"] > 0.5 + 0.05 + 0.1
+
+
+def test_refine_with_pyin_does_not_extend_past_the_next_notes_onset(tmp_path):
+    samplerate = 22050
+    audio = _harmonic_tone(261.63, duration_s=2.0, samplerate=samplerate)
+    notes = [
+        {"pitch_midi": 60, "pitch_hz": 261.63, "onset": 0.2, "offset": 1.0, "duration": 0.8, "velocity": 0.8},
+        {"pitch_midi": 60, "pitch_hz": 261.63, "onset": 1.1, "offset": 1.5, "duration": 0.4, "velocity": 0.8},
+    ]
+
+    refined = _refine_with_pyin(notes, audio, samplerate)
+
+    assert refined[0]["offset"] <= 1.1
+    assert refined[0]["offset"] <= refined[1]["onset"]
+
+
+def test_drop_unconfirmed_pitch_spikes_drops_a_short_unvoiced_big_jump_note():
+    # Mirrors the one real case measured on `test-song`: a short note, a big jump from its
+    # neighbor, and pYIN finding nothing voiced in its window at all.
+    notes = [
+        _make_note(56, 0.0, 1.0),
+        _make_note(71, 1.0, 1.15),
+        _make_note(55, 1.15, 2.0),
+    ]
+    times = np.array([0.0, 0.2, 0.4, 0.6, 0.8, 1.0, 1.05, 1.1, 1.2, 1.4, 1.6, 1.8])
+    midi = np.array([56.0, 56.0, 56.0, 56.0, 56.0, np.nan, np.nan, np.nan, 55.0, 55.0, 55.0, 55.0])
+
+    result = _drop_unconfirmed_pitch_spikes(notes, times, midi)
+
+    assert [n["pitch_midi"] for n in result] == [56, 55]
+
+
+def test_drop_unconfirmed_pitch_spikes_keeps_a_small_jump_even_if_unvoiced():
+    # Same lack of pYIN confirmation, but the jump from its neighbors is small -- real singing
+    # pYIN just failed to track (breathy delivery, ornamentation), not the octave-confusion
+    # signature; measured on a real Korean-language test song, most low-voiced-fraction notes
+    # looked like this, not like the artifact case above.
+    notes = [
+        _make_note(56, 0.0, 1.0),
+        _make_note(59, 1.0, 1.15),
+        _make_note(56, 1.15, 2.0),
+    ]
+    times = np.array([0.0, 0.5, 1.0, 1.05, 1.1, 1.5])
+    midi = np.array([56.0, 56.0, np.nan, np.nan, np.nan, 56.0])
+
+    result = _drop_unconfirmed_pitch_spikes(notes, times, midi)
+
+    assert [n["pitch_midi"] for n in result] == [56, 59, 56]
+
+
+def test_drop_unconfirmed_pitch_spikes_keeps_a_long_note_even_if_unvoiced_and_a_big_jump():
+    # Same jump and lack of confirmation, but the note itself is long -- outside the measured
+    # artifact signature (every real case was well under the duration cap), so leave it alone
+    # rather than risk dropping a real long note pYIN happened to lose track of.
+    notes = [
+        _make_note(56, 0.0, 1.0),
+        _make_note(71, 1.0, 2.0),
+        _make_note(55, 2.0, 3.0),
+    ]
+    times = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 2.5])
+    midi = np.array([56.0, 56.0, np.nan, np.nan, 55.0, 55.0])
+
+    result = _drop_unconfirmed_pitch_spikes(notes, times, midi)
+
+    assert [n["pitch_midi"] for n in result] == [56, 71, 55]
+
+
+def test_drop_unconfirmed_pitch_spikes_keeps_a_well_confirmed_short_big_jump_note():
+    # Same short duration and big jump, but pYIN independently confirms the same pitch throughout
+    # -- a real fast melodic movement (melisma/grace note), not an artifact. Measured on real songs:
+    # the vast majority of short, big-jump notes look like this, which is exactly why voiced
+    # fraction has to gate the jump/duration check rather than the reverse.
+    notes = [
+        _make_note(56, 0.0, 1.0),
+        _make_note(71, 1.0, 1.15),
+        _make_note(55, 1.15, 2.0),
+    ]
+    times = np.array([0.0, 0.5, 1.0, 1.05, 1.1, 1.5])
+    midi = np.array([56.0, 56.0, 71.0, 71.0, 71.0, 55.0])
+
+    result = _drop_unconfirmed_pitch_spikes(notes, times, midi)
+
+    assert [n["pitch_midi"] for n in result] == [56, 71, 55]
+
+
+def test_refine_with_pyin_drops_a_note_with_no_independent_confirmation(tmp_path):
+    samplerate = 22050
+    # Two real, continuously-sung notes with a short near-silent gap between them -- but basic-pitch
+    # (wrongly) reported a third, short, far-off-pitch note sitting in that gap, the same failure
+    # mode measured on the real test song. The gap is wide enough (0.35s) that the bogus note's own
+    # window (0.7-0.8s) sits well clear of pYIN's frame-smearing at each real tone's edge (confirmed
+    # directly: pYIN still reports voiced content up to ~0.05s past a tone's actual boundary).
+    first = _harmonic_tone(261.63, duration_s=0.6, samplerate=samplerate)  # C4 (MIDI 60)
+    silence = np.zeros(int(0.35 * samplerate), dtype=np.float32)
+    second = _harmonic_tone(246.94, duration_s=0.6, samplerate=samplerate)  # B3 (MIDI 59)
+    audio = np.concatenate([first, silence, second])
+    notes = [
+        {"pitch_midi": 60, "pitch_hz": 261.63, "onset": 0.1, "offset": 0.55, "duration": 0.45, "velocity": 0.8},
+        {"pitch_midi": 80, "pitch_hz": 987.77, "onset": 0.7, "offset": 0.8, "duration": 0.1, "velocity": 0.4},
+        {"pitch_midi": 59, "pitch_hz": 246.94, "onset": 0.95, "offset": 1.35, "duration": 0.4, "velocity": 0.8},
+    ]
+
+    refined = _refine_with_pyin(notes, audio, samplerate)
+
+    assert [n["pitch_midi"] for n in refined] == [60, 59]
+
+
+def test_collapse_octave_blips_handles_a_blip_ending_the_note_list():
+    # The blip's trailing neighbor is also the very last note in the song -- exercises the
+    # end-of-list bookkeeping so the final note isn't dropped or double-counted (a prior unrelated
+    # note is included so the blip isn't at the very start of the list either).
+    notes = [
+        _make_note(58, -1.0, 0.0),
+        _make_note(60, 0.0, 1.0),
+        _make_note(72, 1.0, 1.2),
+        _make_note(60, 1.2, 2.0),
+    ]
+    result = _collapse_octave_blips(notes)
+    assert [n["pitch_midi"] for n in result] == [58, 60]
+    assert result[-1]["offset"] == 2.0

@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from audio_pipeline.separation import separate_stems
+from audio_pipeline.separation import _progress_callback, separate_stems
 
 
 def _write_synthetic_clip(path, duration_s=2.0, samplerate=44100, freq_hz=220.0):
@@ -63,3 +63,47 @@ def test_instrumental_and_vocals_reconstruct_original_mix(tmp_path):
     n = min(len(original), len(vocals), len(instrumental))
     reconstructed = vocals[:n] + instrumental[:n]
     np.testing.assert_allclose(reconstructed, original[:n], atol=1e-3)
+
+
+def test_separate_stems_reports_progress_up_to_1(tmp_path):
+    input_path = tmp_path / "synthetic_input.wav"
+    output_dir = tmp_path / "out"
+    _write_synthetic_clip(input_path, duration_s=2.0)
+
+    progress_seen = []
+    separate_stems(input_path, output_dir, on_progress=progress_seen.append)
+
+    assert progress_seen, "on_progress was never called"
+    assert progress_seen[-1] == pytest.approx(1.0)
+    assert all(0.0 <= fraction <= 1.0 for fraction in progress_seen)
+
+
+def test_progress_callback_only_reports_on_segment_end():
+    seen = []
+    callback = _progress_callback(seen.append)
+
+    callback(
+        {"state": "start", "segment_offset": 0, "audio_length": 1000, "model_idx_in_bag": 0, "models": 1}
+    )
+    assert seen == []
+
+    callback(
+        {"state": "end", "segment_offset": 500, "audio_length": 1000, "model_idx_in_bag": 0, "models": 1}
+    )
+    callback(
+        {"state": "end", "segment_offset": 1000, "audio_length": 1000, "model_idx_in_bag": 0, "models": 1}
+    )
+    assert seen == [0.5, 1.0]
+
+
+def test_progress_callback_accounts_for_multiple_submodels_in_a_bag():
+    seen = []
+    callback = _progress_callback(seen.append)
+
+    callback(
+        {"state": "end", "segment_offset": 1000, "audio_length": 1000, "model_idx_in_bag": 0, "models": 2}
+    )
+    callback(
+        {"state": "end", "segment_offset": 1000, "audio_length": 1000, "model_idx_in_bag": 1, "models": 2}
+    )
+    assert seen == [0.5, 1.0]
