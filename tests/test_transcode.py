@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from audio_pipeline.transcode import transcode_to_mp3
+from audio_pipeline.transcode import transcode_to_mp3, transcode_to_wav
 
 
 def _write_synthetic_clip(path, duration_s=2.0, samplerate=44100, freq_hz=220.0):
@@ -44,3 +44,28 @@ def test_transcode_to_mp3_raises_a_clear_error_on_a_bogus_input(tmp_path):
 
     with pytest.raises(RuntimeError, match="ffmpeg failed to transcode"):
         transcode_to_mp3(bogus_path, tmp_path / "out")
+
+
+def test_transcode_to_wav_produces_a_valid_wav(tmp_path):
+    input_duration_s = 2.0
+    input_path = tmp_path / "synthetic_input.wav"
+    output_dir = tmp_path / "out"
+    _write_synthetic_clip(input_path, duration_s=input_duration_s)
+
+    wav_path = transcode_to_wav(input_path, output_dir)
+
+    assert wav_path.exists()
+    assert wav_path.suffix == ".wav"
+    data, samplerate = sf.read(wav_path)
+    assert samplerate == 44100
+    assert data.shape[0] > 0
+    output_duration_s = data.shape[0] / samplerate
+    assert output_duration_s == pytest.approx(input_duration_s, abs=0.5)
+
+
+def test_transcode_to_wav_raises_a_clear_error_on_a_bogus_input(tmp_path):
+    bogus_path = tmp_path / "not_audio.webm"
+    bogus_path.write_bytes(b"this is not a real media file")
+
+    with pytest.raises(RuntimeError, match="ffmpeg failed to transcode"):
+        transcode_to_wav(bogus_path, tmp_path / "out")
