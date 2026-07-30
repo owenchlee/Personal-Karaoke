@@ -51,6 +51,7 @@ class Job:
     id: str
     url: str
     language: str | None = None
+    separation_model: str = "htdemucs"
     status: str = "queued"
     progress: float = 0.0
     slug: str | None = None
@@ -130,6 +131,24 @@ def _sync_meta_title(song_cache_dir: Path, title: str) -> None:
         meta_path.write_text(json.dumps(meta, indent=2))
 
 
+def _cached_separation_model(song_cache_dir: Path) -> str:
+    """The separation model recorded in `song_cache_dir`'s meta.json, or the
+    default ("htdemucs") for a cached song processed before this field
+    existed.
+    """
+    meta_path = song_cache_dir / "meta.json"
+    if not meta_path.exists():
+        return "htdemucs"
+    meta = json.loads(meta_path.read_text())
+    return meta.get("separation_model", "htdemucs")
+
+
+def _needs_reprocessing(slug: str, requested_model: str) -> bool:
+    if not is_cached(CACHE_DIR, slug):
+        return True
+    return _cached_separation_model(CACHE_DIR / slug) != requested_model
+
+
 def _run_job(job: Job) -> None:
     def on_progress(stage: str, fraction: float = 0.0) -> None:
         with job.lock:
@@ -144,17 +163,23 @@ def _run_job(job: Job) -> None:
         with _lock_for_slug(slug):
             on_progress("downloading")
 
-            if not is_cached(CACHE_DIR, slug):
+            if _needs_reprocessing(slug, job.separation_model):
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     downloaded_path, title = download_audio(
                         job.url, Path(tmp_dir),
                         on_progress=lambda fraction: on_progress("downloading", fraction),
                     )
                     slug = slugify(title)
+                    # Re-check against the *real* (downloaded) title's slug -- probe_title's
+                    # guess and the real title can differ, and each has its own cache entry.
+                    force = is_cached(CACHE_DIR, slug) and (
+                        _cached_separation_model(CACHE_DIR / slug) != job.separation_model
+                    )
 
                     process_song(
                         downloaded_path, cache_dir=CACHE_DIR, song_id=slug, on_progress=on_progress,
                         language=job.language, lyrics_query=title,
+                        separation_model=job.separation_model, force=force,
                     )
 
             _sync_meta_title(CACHE_DIR / slug, title)
@@ -178,6 +203,7 @@ def _run_job(job: Job) -> None:
 class CreateJobRequest(BaseModel):
     url: str
     language: Literal["en", "yue"] | None = None
+    separation_model: Literal["htdemucs", "htdemucs_ft", "bs_roformer"] = "htdemucs"
 
 
 class SubmitScoreRequest(BaseModel):
@@ -201,7 +227,10 @@ app.add_middleware(
 @app.post("/api/jobs")
 def create_job(request: CreateJobRequest) -> dict:
     job_id = uuid.uuid4().hex
-    job = Job(id=job_id, url=request.url, language=request.language)
+    job = Job(
+        id=job_id, url=request.url, language=request.language,
+        separation_model=request.separation_model,
+    )
     _JOBS[job_id] = job
     threading.Thread(target=_run_job, args=(job,), daemon=True).start()
     return {"job_id": job_id}

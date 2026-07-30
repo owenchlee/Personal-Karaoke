@@ -223,6 +223,102 @@ def test_song_dir_rejects_a_windows_backslash_escape(tmp_path):
     assert exc_info.value.status_code == 400
 
 
+def test_run_job_forces_reprocessing_when_the_cached_model_differs(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    public_dir = tmp_path / "public"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    monkeypatch.setattr(server, "PUBLIC_DIR", public_dir)
+    monkeypatch.setattr(server, "_SLUG_LOCKS", {})
+
+    # Pre-seed a fully cached song, separated with htdemucs (the default).
+    song_cache_dir = cache_dir / "my-song"
+    song_cache_dir.mkdir(parents=True)
+    (song_cache_dir / "instrumental.wav").write_bytes(b"cached wav data")
+    (song_cache_dir / "notes.json").write_text("[]")
+    (song_cache_dir / "lyrics.json").write_text("[]")
+    (song_cache_dir / "meta.json").write_text(
+        json.dumps({
+            "song_id": "my-song", "processed_at": "2026-07-28T00:00:00+00:00",
+            "separation_model": "htdemucs",
+        })
+    )
+
+    process_song_calls = []
+
+    def fake_probe_title(url):
+        return "My Song"
+
+    def fake_download_audio(url, output_dir, on_progress=None):
+        return Path(output_dir) / "video.mp4", "My Song"
+
+    def fake_process_song(
+        video_path, cache_dir, song_id, on_progress, language, lyrics_query, separation_model,
+        force,
+    ):
+        process_song_calls.append({"separation_model": separation_model, "force": force})
+        song_cache_dir = Path(cache_dir) / song_id
+        song_cache_dir.mkdir(parents=True, exist_ok=True)
+        (song_cache_dir / "instrumental.wav").write_bytes(b"new wav data")
+        (song_cache_dir / "notes.json").write_text("[]")
+        (song_cache_dir / "lyrics.json").write_text("[]")
+        (song_cache_dir / "meta.json").write_text(
+            json.dumps({
+                "song_id": song_id, "processed_at": "2026-07-29T00:00:00+00:00",
+                "separation_model": separation_model,
+            })
+        )
+
+    monkeypatch.setattr(server, "probe_title", fake_probe_title)
+    monkeypatch.setattr(server, "download_audio", fake_download_audio)
+    monkeypatch.setattr(server, "process_song", fake_process_song)
+
+    job = server.Job(
+        id="job-1", url="https://example.com/watch?v=abc", separation_model="htdemucs_ft",
+    )
+    server._run_job(job)
+
+    assert process_song_calls == [{"separation_model": "htdemucs_ft", "force": True}]
+    assert job.status == "done"
+
+
+def test_run_job_skips_reprocessing_when_the_cached_model_matches(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    public_dir = tmp_path / "public"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    monkeypatch.setattr(server, "PUBLIC_DIR", public_dir)
+    monkeypatch.setattr(server, "_SLUG_LOCKS", {})
+
+    song_cache_dir = cache_dir / "my-song"
+    song_cache_dir.mkdir(parents=True)
+    (song_cache_dir / "instrumental.wav").write_bytes(b"cached wav data")
+    (song_cache_dir / "notes.json").write_text("[]")
+    (song_cache_dir / "lyrics.json").write_text("[]")
+    (song_cache_dir / "meta.json").write_text(
+        json.dumps({
+            "song_id": "my-song", "processed_at": "2026-07-28T00:00:00+00:00",
+            "separation_model": "htdemucs",
+        })
+    )
+
+    def fake_probe_title(url):
+        return "My Song"
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("should not be called when the cache already matches")
+
+    monkeypatch.setattr(server, "probe_title", fake_probe_title)
+    monkeypatch.setattr(server, "download_audio", _fail_if_called)
+    monkeypatch.setattr(server, "process_song", _fail_if_called)
+
+    job = server.Job(
+        id="job-1", url="https://example.com/watch?v=abc", separation_model="htdemucs",
+    )
+    server._run_job(job)
+
+    assert job.status == "done"
+    assert job.slug == "my-song"
+
+
 def test_run_job_serializes_concurrent_requests_for_the_same_song(tmp_path, monkeypatch):
     """Regression test for a real bug: two /api/jobs requests for the same
     song that overlap in time both used to run the full pipeline against the
@@ -250,7 +346,10 @@ def test_run_job_serializes_concurrent_requests_for_the_same_song(tmp_path, monk
     def fake_download_audio(url, output_dir, on_progress=None):
         return Path(output_dir) / "video.mp4", "My Song"
 
-    def fake_process_song(video_path, cache_dir, song_id, on_progress, language, lyrics_query):
+    def fake_process_song(
+        video_path, cache_dir, song_id, on_progress, language, lyrics_query, separation_model,
+        force,
+    ):
         call_count["n"] += 1
         entered_process_song.set()
         assert release_process_song.wait(timeout=5), "test deadlocked waiting to be released"
@@ -458,7 +557,10 @@ def test_run_job_reports_real_progress_and_reaches_1_on_success(tmp_path, monkey
             on_progress(0.5)
         return Path(output_dir) / "video.mp4", "My Song"
 
-    def fake_process_song(video_path, cache_dir, song_id, on_progress, language, lyrics_query):
+    def fake_process_song(
+        video_path, cache_dir, song_id, on_progress, language, lyrics_query, separation_model,
+        force,
+    ):
         on_progress("separating", 1.0)
         on_progress("transcribing_lyrics", 0.5)
         song_cache_dir = Path(cache_dir) / song_id
