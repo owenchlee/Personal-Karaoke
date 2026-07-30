@@ -10,10 +10,12 @@ interface LoadSongFormProps {
 }
 
 type LanguageOption = '' | 'en' | 'yue'
+type SeparationModelOption = 'htdemucs' | 'htdemucs_ft' | 'bs_roformer'
 
 function LoadSongForm({ onLoaded }: LoadSongFormProps) {
   const [url, setUrl] = useState('')
   const [language, setLanguage] = useState<LanguageOption>('')
+  const [separationModel, setSeparationModel] = useState<SeparationModelOption>('htdemucs')
   const [job, setJob] = useState<JobState | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -57,7 +59,11 @@ function LoadSongForm({ onLoaded }: LoadSongFormProps) {
     fetch('/api/jobs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: url.trim(), language: language || null }),
+      body: JSON.stringify({
+        url: url.trim(),
+        language: language || null,
+        separation_model: separationModel,
+      }),
     })
       .then((response) => {
         if (response.status === 502) {
@@ -110,6 +116,18 @@ function LoadSongForm({ onLoaded }: LoadSongFormProps) {
           <option value="">Auto-detect language</option>
           <option value="en">English</option>
           <option value="yue">Cantonese</option>
+        </select>
+        <select
+          id="song-separation-model"
+          className="select-language"
+          value={separationModel}
+          onChange={(event) => setSeparationModel(event.target.value as SeparationModelOption)}
+          disabled={isBusy}
+          aria-label="Vocal separation quality"
+        >
+          <option value="htdemucs">Fast (default)</option>
+          <option value="htdemucs_ft">Better quality (slower)</option>
+          <option value="bs_roformer">Best quality (slowest)</option>
         </select>
         <button type="submit" className="btn btn-primary" disabled={isBusy || !url.trim()}>
           {isBusy ? 'Processing…' : 'Load'}
