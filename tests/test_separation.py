@@ -96,6 +96,33 @@ def test_progress_callback_only_reports_on_segment_end():
     assert seen == [0.5, 1.0]
 
 
+def test_separate_stems_rejects_an_unknown_model(tmp_path):
+    input_path = tmp_path / "synthetic_input.wav"
+    output_dir = tmp_path / "out"
+    _write_synthetic_clip(input_path, duration_s=2.0)
+
+    with pytest.raises(ValueError, match="Unsupported separation model"):
+        separate_stems(input_path, output_dir, model="not-a-real-model")
+
+
+def test_separate_stems_accepts_htdemucs_ft(tmp_path):
+    # htdemucs_ft is a fine-tuned bag of 4 models -- first run downloads all 4 checkpoints
+    # (larger and slower than plain htdemucs's single checkpoint) and requires internet access;
+    # subsequent runs use the local cache, same as the existing htdemucs smoke test above.
+    input_duration_s = 2.0
+    input_path = tmp_path / "synthetic_input.wav"
+    output_dir = tmp_path / "out"
+    _write_synthetic_clip(input_path, duration_s=input_duration_s)
+
+    vocals_path, instrumental_path = separate_stems(input_path, output_dir, model="htdemucs_ft")
+
+    for path in (vocals_path, instrumental_path):
+        assert path.exists()
+        data, samplerate = sf.read(path)
+        assert samplerate > 0
+        assert data.shape[0] > 0
+
+
 def test_progress_callback_accounts_for_multiple_submodels_in_a_bag():
     seen = []
     callback = _progress_callback(seen.append)

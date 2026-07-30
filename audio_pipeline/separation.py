@@ -14,7 +14,7 @@ from demucs import api as demucs_api
 
 from audio_pipeline.device import get_device
 
-_MODEL_NAME = "htdemucs"
+_SUPPORTED_MODELS = ("htdemucs", "htdemucs_ft")
 _VOCALS_STEM = "vocals"
 
 # Demucs splits the track into segments and, by default, processes them one
@@ -43,11 +43,17 @@ def _progress_callback(on_progress: Callable[[float], None]) -> Callable[[dict],
 def separate_stems(
     input_path: str | Path,
     output_dir: str | Path,
+    model: str = "htdemucs",
     on_progress: Callable[[float], None] | None = None,
 ) -> tuple[Path, Path]:
     """Run Demucs on ``input_path`` and save both the isolated vocal stem and
     a reconstructed instrumental track (the original mix minus vocals) as wav
     files inside ``output_dir``.
+
+    ``model`` selects which Demucs checkpoint to run: "htdemucs" (default,
+    fast, ~80s for a 274s song on this CPU -- see NOTES.md) or "htdemucs_ft"
+    (a fine-tuned bag of 4 models, noticeably less bleed, ~4x slower).
+    Raises ``ValueError`` for anything else.
 
     ``on_progress``, if given, is called repeatedly with a 0-1 fraction as
     Demucs finishes each internal segment -- lets a caller (e.g. the job
@@ -56,12 +62,17 @@ def separate_stems(
 
     Returns ``(vocals_path, instrumental_path)``.
     """
+    if model not in _SUPPORTED_MODELS:
+        raise ValueError(
+            f"Unsupported separation model {model!r}; expected one of {_SUPPORTED_MODELS}"
+        )
+
     input_path = Path(input_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     separator = demucs_api.Separator(
-        model=_MODEL_NAME,
+        model=model,
         device=get_device(),
         jobs=_DEFAULT_JOBS,
         callback=_progress_callback(on_progress) if on_progress else None,
@@ -77,7 +88,7 @@ def separate_stems(
 
     if _VOCALS_STEM not in stems:
         raise RuntimeError(
-            f"Model '{_MODEL_NAME}' did not produce a '{_VOCALS_STEM}' stem; "
+            f"Model '{model}' did not produce a '{_VOCALS_STEM}' stem; "
             f"got stems: {sorted(stems)}"
         )
 
