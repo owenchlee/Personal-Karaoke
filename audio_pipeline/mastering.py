@@ -15,6 +15,7 @@ clean the vocal -> loudness-normalize each track -> mix -> limit.
 """
 from pathlib import Path
 
+import ffmpeg
 import soundfile as sf
 
 # Positive = the vocal (mic) track lags the instrumental in a raw two-track recording.
@@ -62,3 +63,35 @@ def _correct_start_offset(
     sf.write(aligned_vocal_path, vocal_data, vocal_sr)
     sf.write(aligned_instrumental_path, instrumental_data, instrumental_sr)
     return aligned_vocal_path, aligned_instrumental_path
+
+
+_HIGHPASS_HZ = 90
+
+
+def _clean_vocal(input_path: Path, output_dir: Path) -> Path:
+    """Highpass (removes rumble/handling noise below ``_HIGHPASS_HZ``), denoise
+    (ffmpeg's built-in ``afftdn`` -- no extra model download, see this
+    feature's design spec for why not ``arnndn``), and compress
+    (``acompressor``, evens out quiet/loud parts) the vocal track. Loudness
+    balancing against the instrumental happens separately (see
+    ``_apply_loudnorm``, added in a later task).
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "vocal_cleaned.wav"
+
+    try:
+        (
+            ffmpeg.input(str(input_path))
+            .filter("highpass", f=_HIGHPASS_HZ)
+            .filter("afftdn")
+            .filter("acompressor")
+            .output(str(output_path))
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+    except ffmpeg.Error as exc:
+        stderr = exc.stderr.decode(errors="replace") if exc.stderr else ""
+        raise RuntimeError(f"ffmpeg failed to clean vocal {input_path}: {stderr}") from exc
+
+    return output_path

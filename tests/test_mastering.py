@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from audio_pipeline.mastering import _correct_start_offset
+from audio_pipeline.mastering import _clean_vocal, _correct_start_offset
 
 
 def _write_tone(path, duration_s=3.0, samplerate=44100, freq_hz=220.0, amplitude=0.2):
@@ -96,3 +96,32 @@ def test_correct_start_offset_is_a_no_op_at_zero(tmp_path):
     aligned_vocal, _ = sf.read(aligned_vocal_path)
     original_vocal, _ = sf.read(vocal_path)
     np.testing.assert_allclose(aligned_vocal, original_vocal, atol=1e-6)
+
+
+def test_clean_vocal_removes_low_frequency_rumble(tmp_path):
+    duration_s = 2.0
+    samplerate = 44100
+    t = np.linspace(0, duration_s, int(duration_s * samplerate), endpoint=False)
+    voice = 0.2 * np.sin(2 * np.pi * 440.0 * t)
+    rumble = 0.2 * np.sin(2 * np.pi * 20.0 * t)  # well below the 90Hz highpass cutoff
+    mixed = (voice + rumble).astype(np.float32)
+
+    input_path = tmp_path / "noisy_vocal.wav"
+    sf.write(input_path, mixed, samplerate)
+
+    cleaned_path = _clean_vocal(input_path, tmp_path)
+    cleaned, cleaned_sr = sf.read(cleaned_path)
+    assert cleaned_sr == samplerate
+
+    rumble_bin = int(round(20.0 * duration_s))
+    original_rumble_energy = np.abs(np.fft.rfft(mixed))[rumble_bin]
+    cleaned_rumble_energy = np.abs(np.fft.rfft(cleaned.astype(np.float32)))[rumble_bin]
+    assert cleaned_rumble_energy < original_rumble_energy * 0.1
+
+
+def test_clean_vocal_raises_a_clear_error_on_a_bogus_input(tmp_path):
+    bogus_path = tmp_path / "not_audio.wav"
+    bogus_path.write_bytes(b"this is not real audio")
+
+    with pytest.raises(RuntimeError, match="ffmpeg failed to clean vocal"):
+        _clean_vocal(bogus_path, tmp_path / "out")
