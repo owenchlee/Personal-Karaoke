@@ -61,6 +61,33 @@ POST /api/recordings/mp3  (multipart form: vocal=<blob>, instrumental=<blob>, so
   -> saved under RECORDINGS_DIR, returned to the browser exactly as today
 ```
 
+## Recording start offset (new, added after feedback on a first draft)
+
+Separately reported: recordings currently sound "off" -- not drifting progressively worse through
+the take, but shifted as a whole from where the singer actually started, as if the vocal lands
+against the music a beat later (or earlier) than intended from the very first note.
+
+**Likely cause**: `elementSource` (the instrumental) is reading already-decoded audio straight out
+of the `<audio>` element with effectively no extra latency, while the mic path
+(`getUserMedia` -> hardware capture -> driver buffering -> `createMediaStreamSource`) has real
+warm-up/capture latency before genuine signal starts flowing. Today, both get mixed into one
+`AudioContext` graph in real time, so the mic's slower start-up means the singer's actual voice
+lands in the recorded mix later, relative to the music, than when they actually started singing --
+a roughly constant offset, matching "shifted from the start," not a growing drift. This is a
+property of the capture path, not of the analysis pass, so switching to two separately-recorded
+tracks (per this spec) doesn't fix it by itself -- both new recorders inherit the same underlying
+mic-vs-instrumental startup asymmetry.
+
+**Fix**: correct it as a mastering-time alignment step in `audio_pipeline/mastering.py`, not a
+frontend timing hack -- shift the instrumental track (or equivalently trim the vocal track's
+leading edge) by a fixed compensation constant before mixing. Per this codebase's established
+convention (every other "magic number" here -- `_SILENCE_RMS_GATE`, `MIN_RMS`, the LUFS targets
+above -- comes from measuring a real recording, not a guess), this constant must be measured
+during implementation: record a real take with a sharp, identifiable transient (e.g. a clap) at a
+known instant, and directly measure the actual offset between the two decoded wav tracks, rather
+than assuming a textbook "typical mic latency" number. Land on whichever direction and magnitude
+the real measurement shows -- this section intentionally doesn't pre-guess the value.
+
 ## Frontend changes
 
 **`frontend/src/hooks/useRecording.ts`**
@@ -83,9 +110,11 @@ POST /api/recordings/mp3  (multipart form: vocal=<blob>, instrumental=<blob>, so
   this project's one-file-per-concern pattern (`separation.py`, `transcode.py`,
   `forced_alignment.py`, etc.).
 - Vocal chain: highpass (~90Hz) -> `afftdn` denoise -> `acompressor` -> two-pass `loudnorm` to a
-  vocal-forward target (starting point: vocal -14 LUFS, instrumental -20 LUFS -- a real recording
-  needs a human listen to confirm this balance is right, same caveat this project attaches to every
-  audio-quality claim; not hard-committed here).
+  vocal-forward target (starting point: vocal -16 LUFS, instrumental -20 LUFS -- a narrower, less
+  aggressive gap than an initial draft of this spec had, per direct feedback that the voice should
+  sit a bit less loud than a first cut of this feature would have made it. Still a starting point,
+  not a final answer -- needs a human listen to confirm, same caveat this project attaches to every
+  audio-quality claim).
 - Instrumental chain: two-pass `loudnorm` to its own (quieter) target only -- it's already studio
   quality from the pipeline's own separation step, no denoise/compression needed.
 - Mix via `amix`, then `alimiter` on the combined output so the vocal boost can't clip.
@@ -119,7 +148,12 @@ silent fallback to an unmastered mix.
   (`vocal`/`instrumental` files) contract in place of the old single-body one.
 - **Manual**: process a real sung take through the updated endpoint and listen -- same "needs a
   human ear" caveat this file gives every other real-audio verification (loudness targets above are
-  a starting point, not a final answer, until checked this way).
+  a starting point, not a final answer, until checked this way). This is also how the start-offset
+  compensation constant gets measured in the first place (see "Recording start offset" above), so
+  this manual pass covers both loudness balance and start-alignment together.
+- `test_mastering.py` also covers the offset-compensation step directly: feed synthetic vocal/
+  instrumental clips with a known, deliberately-introduced offset between them and assert the
+  mastered output corrects it back to (approximately) zero.
 
 ## Open questions resolved during brainstorming
 
@@ -130,3 +164,8 @@ silent fallback to an unmastered mix.
   bundling an external RNNoise model) -- browser-side `noiseSuppression`/`echoCancellation`/
   `autoGainControl` are already on for the mic stream (`useMicPitch.ts`), so this is a second pass,
   not the only line of defense.
+- Vocal loudness target narrowed from an initial -14 LUFS to -16 LUFS (vs. instrumental's -20
+  LUFS) after feedback that the voice should be a bit less loud.
+- Added start-offset compensation (see "Recording start offset" section) after feedback that
+  recordings sound shifted from the start when listened back to -- scoped as a measured, fixed
+  mastering-time correction, not a general per-device latency-detection system.
