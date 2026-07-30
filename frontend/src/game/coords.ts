@@ -8,10 +8,11 @@ export interface PitchRange {
 const PITCH_PAD_SEMITONES = 2
 const DEFAULT_PITCH_RANGE: PitchRange = { min: 48, max: 72 }
 
-// Lowered from 200 -- see the "reduce difficulty" pass in NOTES.md. A slower scroll gives more
-// reaction time before a note reaches the playhead without changing the underlying note timing
-// (still driven straight off `audioRef.current.currentTime`, so it stays sample-accurate).
-export const DEFAULT_PX_PER_SECOND = 160
+// Lowered from 200 -> 160, then 160 -> 130 -- see the "reduce difficulty" passes in NOTES.md. A
+// slower scroll gives more reaction time before a note reaches the playhead without changing the
+// underlying note timing (still driven straight off `audioRef.current.currentTime`, so it stays
+// sample-accurate).
+export const DEFAULT_PX_PER_SECOND = 130
 export const DEFAULT_PAST_BUFFER_SECONDS = 0.5
 
 /** Mapping strategy: the vertical axis is *relative*, not absolute -- it always auto-fits to

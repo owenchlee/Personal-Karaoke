@@ -19,6 +19,9 @@
   --danger: #dc2626;
   --danger-bg: rgba(220, 38, 38, 0.1);
 
+  --star: #d97706;
+  --star-bg: rgba(217, 119, 6, 0.1);
+
   --shadow:
     rgba(0, 0, 0, 0.08) 0 10px 20px -6px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 
@@ -37,6 +40,25 @@
 
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
+  --font-display: 'Space Grotesk', var(--sans);
+
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-base: 17px;
+  --text-lg: 19px;
+  --text-xl: 24px;
+  --text-2xl: 32px;
+  --text-3xl: 40px;
+
+  --note-pending: #f8fafc;
+  --note-hit: #16a34a;
+  --note-missed: #dc2626;
+  --note-grid-line: rgba(28, 25, 23, 0.12);
+  --note-grid-label: rgba(28, 25, 23, 0.55);
+  --note-playhead: var(--accent);
+  --pitch-indicator: #0284c7;
+  --pitch-indicator-stroke: rgba(255, 255, 255, 0.9);
+  --stage-bg: var(--surface-2);
 
   font: 17px/150% var(--sans);
   color-scheme: light dark;
@@ -74,9 +96,30 @@
     --danger: #f87171;
     --danger-bg: rgba(248, 113, 113, 0.14);
 
+    --star: #fbbf24;
+    --star-bg: rgba(251, 191, 36, 0.14);
+
     --shadow:
       rgba(0, 0, 0, 0.5) 0 10px 20px -6px, rgba(0, 0, 0, 0.3) 0 4px 6px -2px;
+
+    --note-pending: #f8fafc;
+    --note-hit: #22c55e;
+    --note-missed: #ef4444;
+    --note-grid-line: rgba(148, 163, 184, 0.15);
+    --note-grid-label: rgba(148, 163, 184, 0.7);
+    --note-playhead: var(--accent);
+    --pitch-indicator: #38bdf8;
+    --pitch-indicator-stroke: rgba(255, 255, 255, 0.85);
+    --stage-bg: var(--surface-2);
   }
+}
+
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('/fonts/SpaceGrotesk-Variable.woff2') format('woff2');
+  font-weight: 300 700;
+  font-style: normal;
+  font-display: swap;
 }
 
 * {
@@ -103,14 +146,14 @@ button {
 
 h1,
 h2 {
-  font-family: var(--sans);
+  font-family: var(--font-display);
   font-weight: 700;
   color: var(--text-h);
   margin: 0;
 }
 
 h2 {
-  font-size: 19px;
+  font-size: var(--text-lg);
   letter-spacing: -0.1px;
 }
 
@@ -153,6 +196,7 @@ code {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
+  font-family: var(--font-display);
   font-size: 18px;
   font-weight: 700;
   color: var(--text-h);
@@ -198,6 +242,11 @@ code {
 
 .panel h2 {
   margin-bottom: var(--space-3);
+}
+
+.player-panel {
+  border-top: 2px solid var(--accent);
+  padding: var(--space-6) var(--space-5);
 }
 
 .status-message {
@@ -255,6 +304,7 @@ code {
 
 .btn-primary:hover:not(:disabled) {
   background: var(--cta-hover);
+  box-shadow: 0 4px 12px -4px color-mix(in srgb, var(--cta) 55%, transparent);
 }
 
 .btn-secondary {
@@ -386,6 +436,21 @@ code {
   background: var(--surface-2);
 }
 
+.song-library-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+}
+
+.song-library-action {
+  flex-shrink: 0;
+  margin-right: var(--space-3);
+}
+
 .song-library-title {
   max-width: 100%;
   overflow: hidden;
@@ -398,6 +463,12 @@ code {
 .song-library-date {
   font-size: 13px;
   color: var(--muted);
+}
+
+.song-library-score {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
 }
 
 .song-library-delete {
@@ -422,6 +493,112 @@ code {
 }
 
 .song-library-delete:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.song-library-star {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-left: var(--space-3);
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.song-library-star:hover:not(:disabled) {
+  color: var(--star);
+  background: var(--star-bg);
+  border-color: var(--star);
+}
+
+.song-library-star--active {
+  color: var(--star);
+}
+
+.song-library-star:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.recordings-list {
+  display: flex;
+  flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.recordings-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.recordings-row + .recordings-row {
+  border-top: 1px solid var(--border);
+}
+
+.recordings-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--space-3) var(--space-4);
+}
+
+.recordings-action {
+  flex-shrink: 0;
+  margin-right: var(--space-3);
+}
+
+.recordings-title {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.recordings-date {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.recordings-delete {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-right: var(--space-3);
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.recordings-delete:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+
+.recordings-delete:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -453,6 +630,12 @@ code {
   border-radius: var(--radius-sm);
   padding: var(--space-2) var(--space-3);
   font-size: 14px;
+}
+
+.calibration-actions,
+.calibration-running,
+.calibration-result {
+  margin-top: var(--space-3);
 }
 
 /* Sidebar */
@@ -559,6 +742,15 @@ code {
   background: var(--surface-2);
 }
 
+.sidebar-nav-link--active {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.sidebar-nav-link--active:hover {
+  background: var(--accent-bg);
+}
+
 /* Player */
 
 .player-head {
@@ -600,6 +792,7 @@ code {
 }
 
 .score-badge {
+  font-family: var(--font-display);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--text-h);
@@ -609,12 +802,79 @@ code {
   padding: var(--space-2) var(--space-3);
 }
 
+.recording-active {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.recording-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: recording-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes recording-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
 .final-score-banner {
   text-align: center;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
   color: var(--cta-fg);
   background: var(--cta);
   border-radius: var(--radius-sm);
   padding: var(--space-3);
+}
+
+.final-score-highlight {
+  margin-top: var(--space-2);
+  font-weight: 700;
+}
+
+.final-score-subtext {
+  margin-top: var(--space-2);
+  font-size: 0.9rem;
+  opacity: 0.85;
+}
+
+.badge-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-2);
+  list-style: none;
+  margin: 0 0 var(--space-4);
+  padding: 0;
+}
+
+.badge-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.badge-row--locked {
+  opacity: 0.45;
+}
+
+.badge-label {
+  font-weight: 700;
+  color: var(--text-h);
+}
+
+.badge-description {
+  font-size: 13px;
+  color: var(--muted);
 }
 
 /* Always-visible "what note should I sing vs. what am I singing" readout -- the concrete answer
@@ -646,6 +906,7 @@ code {
 }
 
 .pitch-readout-value {
+  font-family: var(--font-display);
   font-size: 1.5rem;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -685,14 +946,17 @@ code {
 .stage {
   border-radius: var(--radius-md);
   overflow: hidden;
-  border: 1px solid var(--border);
-  line-height: 0;
+  border: 1px solid var(--accent-border);
+  background: var(--stage-bg);
+  padding: var(--space-2);
+  box-shadow: inset 0 0 0 1px var(--surface);
 }
 
 .stage canvas {
   display: block;
   width: 100%;
   height: auto;
+  border-radius: var(--radius-sm);
 }
 
 /* Lyrics */
@@ -780,6 +1044,10 @@ code {
   background: var(--cta);
   border-radius: inherit;
   transition: width 60ms linear;
+}
+
+.proof-mic-stop {
+  margin-top: var(--space-3);
 }
 
 @media (prefers-reduced-motion: reduce) {

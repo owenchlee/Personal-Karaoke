@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.egg-info/
+*.log
 
 # Model weights / caches downloaded by demucs & basic-pitch
 .cache/
@@ -12,6 +13,8 @@ pretrained_models/
 samples/
 output/
 cache/
+recordings/
+scores/
 *.wav
 *.mp3
 *.mp4

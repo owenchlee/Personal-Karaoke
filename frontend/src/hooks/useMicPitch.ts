@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import { PitchDetector } from 'pitchy'
 import { hzToMidi } from '../game/pitch'
+import { loadCalibrationOffsetSeconds } from '../game/calibration'
 
 export type MicStatus = 'idle' | 'requesting' | 'active' | 'denied'
 
@@ -19,12 +20,16 @@ const CLARITY_THRESHOLD = 0.8
 // through the room, on top of whatever `echoCancellation` below manages to cancel -- that
 // constraint is a request Chrome tries to honor, not a guarantee, and real speakers at listening
 // volume put the echo path well outside what mic-side AEC is tuned for (built for a laptop's own
-// speakers a few inches away). A quiet room-bleed signal is much lower level than someone actually
-// singing into the mic, so gate on loudness too: same threshold already validated server-side for
-// vocal-stem silence detection (`_SILENCE_RMS_GATE` in melody_extraction.py). This won't catch
-// bleed that's genuinely as loud as the singer's voice at the mic -- there's no way to tell those
-// apart from level alone -- but it does stop quiet backing-track leakage from registering as pitch.
-const MIN_RMS = 0.01
+// speakers a few inches away). This gate exists only to reject that kind of quiet backing-track
+// leakage (or plain silence/noise floor) -- it is deliberately *not* the primary "is this really a
+// sung pitch" signal, `clarity` above is: pitchy's clarity is a normalized measure of how strongly
+// periodic the signal is, and holds up just as well for a genuine clean tone at low volume as at
+// high volume, unlike raw RMS. This constant originally borrowed `_SILENCE_RMS_GATE` from
+// `melody_extraction.py`, but that value was only ever validated against a Demucs-separated vocal
+// stem, not live mic input -- real feedback reported a genuinely-sung long note trailing off
+// quietly (a decrescendo) getting cut from detection well before the singer actually stopped.
+// Lowered substantially so a quiet-but-real tail isn't killed by loudness alone.
+const MIN_RMS = 0.003
 
 function rms(buffer: Float32Array): number {
   let sumSquares = 0
@@ -45,6 +50,9 @@ export function useMicPitch(audioRef: RefObject<HTMLAudioElement | null>) {
   const analyserRef = useRef<AnalyserNode | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const rafRef = useRef<number | null>(null)
+  // Read once per mic session (not per-sample) -- a fresh calibration only takes effect the next
+  // time the mic is (re)started, same as any other one-time setup value.
+  const calibrationOffsetSecondsRef = useRef(0)
 
   const stop = () => {
     if (rafRef.current !== null) {
@@ -79,6 +87,16 @@ export function useMicPitch(audioRef: RefObject<HTMLAudioElement | null>) {
       const detector = PitchDetector.forFloat32Array(analyser.fftSize)
       const buffer = new Float32Array(detector.inputLength)
 
+      // `getFloatTimeDomainData` returns the most recent `fftSize` samples as of *now* -- the
+      // pitch it implies was actually sung starting one whole buffer-length in the past, not at
+      // the moment we finish reading/processing it. Left uncompensated this silently shifts every
+      // detected sample ~40-50ms later than its true position in the song, biasing hit detection
+      // right at note boundaries. Combined with the one-time mic/speaker round-trip latency
+      // measured by the calibration screen (`useCalibration`/`game/calibration.ts`), this is the
+      // full correction applied before a sample is timestamped.
+      const bufferLatencySeconds = analyser.fftSize / context.sampleRate
+      calibrationOffsetSecondsRef.current = loadCalibrationOffsetSeconds()
+
       setStatus('active')
 
       const tick = () => {
@@ -87,8 +105,9 @@ export function useMicPitch(audioRef: RefObject<HTMLAudioElement | null>) {
           currentAnalyser.getFloatTimeDomainData(buffer)
           const [hz, clarity] = detector.findPitch(buffer, context.sampleRate)
           if (hz > 0 && clarity >= CLARITY_THRESHOLD && rms(buffer) >= MIN_RMS) {
+            const songTimeNow = audioRef.current?.currentTime ?? 0
             latestSampleRef.current = {
-              time: audioRef.current?.currentTime ?? 0,
+              time: songTimeNow - bufferLatencySeconds - calibrationOffsetSecondsRef.current,
               hz,
               midi: hzToMidi(hz),
               clarity,
@@ -105,5 +124,5 @@ export function useMicPitch(audioRef: RefObject<HTMLAudioElement | null>) {
 
   useEffect(() => stop, [])
 
-  return { status, start, stop, latestSampleRef }
+  return { status, start, stop, latestSampleRef, streamRef }
 }

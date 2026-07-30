@@ -17,8 +17,11 @@ from audio_pipeline.melody_extraction import (
     _drop_unconfirmed_pitch_spikes,
     _enforce_monophony,
     _pitch_class_distance,
+    _pyin_track,
     _pyin_window,
     _refine_with_pyin,
+    _repair_melody_gaps,
+    _should_correct_note_pitch,
     extract_melody,
 )
 
@@ -226,17 +229,21 @@ def test_pyin_window_separates_voiced_from_unvoiced_and_counts_total_frames():
 
 def test_refine_with_pyin_corrects_a_wrong_octave_and_extends_a_cut_short_offset(tmp_path):
     samplerate = 22050
-    # A real, continuously-sung note at MIDI 60 (C4, ~261.6Hz) for a full 2s -- but the note event
-    # basic-pitch supposedly reported is an octave too high (72) and cut off after only 1s, the
-    # exact two failure modes measured on the real test song (see `_refine_with_pyin`'s docstring).
-    audio = _harmonic_tone(261.63, duration_s=2.0, samplerate=samplerate)
+    # A real, continuously-sung note at MIDI 60 (C4, ~261.6Hz) starting at the very top of the clip
+    # -- but the note event basic-pitch supposedly reported is an octave too high (72) and cut off
+    # early, the exact two failure modes measured on the real test song (see `_refine_with_pyin`'s
+    # docstring). The clip's duration matches exactly as far as a full extension can reach (offset
+    # + `_OFFSET_EXTEND_MAX_SECONDS`), and the note starts at 0.0 matching the audio, so there's no
+    # leftover real-singing gap outside the note for `_repair_melody_gaps` to independently catch --
+    # that behavior has its own dedicated tests above.
+    audio = _harmonic_tone(261.63, duration_s=1.5, samplerate=samplerate)
     notes = [
         {
             "pitch_midi": 72,
             "pitch_hz": 523.25,
-            "onset": 0.2,
+            "onset": 0.0,
             "offset": 1.0,
-            "duration": 0.8,
+            "duration": 1.0,
             "velocity": 0.8,
         }
     ]
@@ -248,7 +255,7 @@ def test_refine_with_pyin_corrects_a_wrong_octave_and_extends_a_cut_short_offset
     assert refined[0]["pitch_hz"] == pytest.approx(261.63, abs=1.0)
     # Extended well past the original (wrong) 1.0s offset, since the tone keeps sounding.
     assert refined[0]["offset"] > 1.3
-    assert refined[0]["duration"] == pytest.approx(refined[0]["offset"] - 0.2)
+    assert refined[0]["duration"] == pytest.approx(refined[0]["offset"] - 0.0)
 
 
 def test_refine_with_pyin_tolerates_a_brief_gap_mid_extension(tmp_path):
@@ -351,6 +358,115 @@ def test_drop_unconfirmed_pitch_spikes_keeps_a_well_confirmed_short_big_jump_not
     result = _drop_unconfirmed_pitch_spikes(notes, times, midi)
 
     assert [n["pitch_midi"] for n in result] == [56, 71, 55]
+
+
+def test_should_correct_note_pitch_trusts_a_well_confirmed_correction():
+    assert _should_correct_note_pitch(voiced_fraction=0.5, disagreement_semitones=1) is True
+
+
+def test_should_correct_note_pitch_trusts_a_sparse_but_unanimous_big_disagreement():
+    # basic-pitch's inference isn't perfectly deterministic run-to-run (see the constant comment
+    # above `_PYIN_SPARSE_MIN_VOICED_FRACTION`): a note can end up with too few voiced pYIN frames
+    # to clear the main 0.3 bar, yet the handful that are voiced unanimously disagree by a full
+    # register -- strong evidence of a wrong note even with sparse data. Measured concretely on
+    # `bruno-mars-count-on-me-lyrics`: reprocessing the identical vocal stem twice with no code
+    # change reported MIDI 81 in one run and 53 in the other for the same moment.
+    assert _should_correct_note_pitch(voiced_fraction=0.15, disagreement_semitones=7) is True
+
+
+def test_should_correct_note_pitch_ignores_a_sparse_small_disagreement():
+    # Same sparse voicing, but the disagreement is small -- a couple of noisy near-miss frames, not
+    # unanimous evidence of a wrong note, so basic-pitch's original pitch is left alone.
+    assert _should_correct_note_pitch(voiced_fraction=0.15, disagreement_semitones=2) is False
+
+
+def test_should_correct_note_pitch_ignores_a_big_disagreement_with_too_little_voicing():
+    # Even a huge disagreement isn't trusted below the sparse floor -- one stray voiced frame isn't
+    # enough evidence either way.
+    assert _should_correct_note_pitch(voiced_fraction=0.05, disagreement_semitones=7) is False
+
+
+def test_repair_melody_gaps_fills_a_real_singing_gap_basic_pitch_missed():
+    # Mirrors the real case measured on `bruno-mars-count-on-me-lyrics`: a real, sustained,
+    # differently-pitched stretch of singing sitting in the gap between two detected notes, with no
+    # basic-pitch note there at all.
+    samplerate = 22050
+    tone_a = _harmonic_tone(261.63, duration_s=0.5, samplerate=samplerate)  # C4 (MIDI 60)
+    tone_gap = _harmonic_tone(329.63, duration_s=0.5, samplerate=samplerate)  # E4 (MIDI 64)
+    tone_b = _harmonic_tone(392.0, duration_s=0.5, samplerate=samplerate)  # G4 (MIDI 67)
+    audio = np.concatenate([tone_a, tone_gap, tone_b])
+    notes = [
+        {"pitch_midi": 60, "pitch_hz": 261.63, "onset": 0.0, "offset": 0.5, "duration": 0.5, "velocity": 0.8},
+        {"pitch_midi": 67, "pitch_hz": 392.0, "onset": 1.0, "offset": 1.5, "duration": 0.5, "velocity": 0.8},
+    ]
+
+    times, midi = _pyin_track(audio, samplerate)
+    repaired = _repair_melody_gaps(notes, times, midi, audio, samplerate)
+
+    assert len(repaired) == 3
+    assert repaired[0]["pitch_midi"] == 60
+    assert repaired[1]["pitch_midi"] == 64
+    assert repaired[1]["onset"] == pytest.approx(0.5, abs=0.05)
+    assert repaired[1]["offset"] == pytest.approx(1.0, abs=0.05)
+    assert repaired[2]["pitch_midi"] == 67
+
+
+def test_repair_melody_gaps_leaves_a_real_silent_gap_alone():
+    samplerate = 22050
+    tone_a = _harmonic_tone(261.63, duration_s=0.5, samplerate=samplerate)
+    silence = np.zeros(int(0.5 * samplerate), dtype=np.float32)
+    tone_b = _harmonic_tone(392.0, duration_s=0.5, samplerate=samplerate)
+    audio = np.concatenate([tone_a, silence, tone_b])
+    notes = [
+        {"pitch_midi": 60, "pitch_hz": 261.63, "onset": 0.0, "offset": 0.5, "duration": 0.5, "velocity": 0.8},
+        {"pitch_midi": 67, "pitch_hz": 392.0, "onset": 1.0, "offset": 1.5, "duration": 0.5, "velocity": 0.8},
+    ]
+
+    times, midi = _pyin_track(audio, samplerate)
+    repaired = _repair_melody_gaps(notes, times, midi, audio, samplerate)
+
+    assert [n["pitch_midi"] for n in repaired] == [60, 67]
+
+
+def test_repair_melody_gaps_ignores_a_too_short_blip():
+    # A blip well under `_GAP_REPAIR_MIN_RUN_SECONDS` (150ms) shouldn't be promoted to a real note --
+    # same "too short to trust" reasoning as `_SPURIOUS_MAX_DURATION_S` elsewhere in this module.
+    samplerate = 22050
+    tone_a = _harmonic_tone(261.63, duration_s=0.5, samplerate=samplerate)
+    blip = _harmonic_tone(329.63, duration_s=0.05, samplerate=samplerate)
+    silence = np.zeros(int(0.45 * samplerate), dtype=np.float32)
+    tone_b = _harmonic_tone(392.0, duration_s=0.5, samplerate=samplerate)
+    audio = np.concatenate([tone_a, blip, silence, tone_b])
+    notes = [
+        {"pitch_midi": 60, "pitch_hz": 261.63, "onset": 0.0, "offset": 0.5, "duration": 0.5, "velocity": 0.8},
+        {"pitch_midi": 67, "pitch_hz": 392.0, "onset": 1.0, "offset": 1.5, "duration": 0.5, "velocity": 0.8},
+    ]
+
+    times, midi = _pyin_track(audio, samplerate)
+    repaired = _repair_melody_gaps(notes, times, midi, audio, samplerate)
+
+    assert [n["pitch_midi"] for n in repaired] == [60, 67]
+
+
+def test_repair_melody_gaps_fills_a_gap_before_the_first_note():
+    samplerate = 22050
+    lead_in = _harmonic_tone(220.0, duration_s=0.5, samplerate=samplerate)  # A3 (MIDI 57)
+    silence = np.zeros(int(0.3 * samplerate), dtype=np.float32)
+    tone_a = _harmonic_tone(261.63, duration_s=0.5, samplerate=samplerate)
+    audio = np.concatenate([lead_in, silence, tone_a])
+    # tone_a's real audio starts at 0.8s (0.5 lead-in + 0.3 silence) -- the note list must agree
+    # with where the audio actually is, or the "gap" this test means to exercise (the silence at
+    # 0.5-0.8s) gets contaminated with real tone_a audio the note list wrongly excludes.
+    notes = [
+        {"pitch_midi": 60, "pitch_hz": 261.63, "onset": 0.8, "offset": 1.3, "duration": 0.5, "velocity": 0.8},
+    ]
+
+    times, midi = _pyin_track(audio, samplerate)
+    repaired = _repair_melody_gaps(notes, times, midi, audio, samplerate)
+
+    assert len(repaired) == 2
+    assert repaired[0]["pitch_midi"] == 57
+    assert repaired[1]["pitch_midi"] == 60
 
 
 def test_refine_with_pyin_drops_a_note_with_no_independent_confirmation(tmp_path):

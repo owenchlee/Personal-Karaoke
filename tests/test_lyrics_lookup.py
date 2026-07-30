@@ -131,6 +131,48 @@ def test_pick_best_synced_lyrics_prefers_closest_duration_match():
     assert _pick_best_synced_lyrics(results, duration_seconds=212) == "[00:00.00]Original version"
 
 
+def test_pick_best_synced_lyrics_skips_a_closer_duration_match_by_the_wrong_artist():
+    # Real-world case: lrclib's title-only search for a common song title (e.g. "Demons") returns
+    # several completely unrelated songs that happen to share that title. A wrong-artist candidate
+    # must lose to a right-artist one even when it's the closer duration match.
+    results = [
+        {
+            "syncedLyrics": "[00:00.00]Wrong song entirely",
+            "duration": 210,
+            "artistName": "Some Other Band",
+        },
+        {
+            "syncedLyrics": "[00:00.00]Real song",
+            "duration": 236,
+            "artistName": "Imagine Dragons",
+        },
+    ]
+
+    assert (
+        _pick_best_synced_lyrics(
+            results, duration_seconds=212, query="Imagine Dragons - Demons (Official Music Video)"
+        )
+        == "[00:00.00]Real song"
+    )
+
+
+def test_pick_best_synced_lyrics_accepts_closest_duration_when_artist_metadata_is_missing():
+    # A candidate with no artistName at all can't be checked against the query -- don't reject it
+    # on missing metadata, just fall through to the existing duration/script behavior.
+    results = [{"syncedLyrics": "[00:00.00]Original version", "duration": 210}]
+
+    assert (
+        _pick_best_synced_lyrics(results, duration_seconds=212, query="Some Song Title")
+        == "[00:00.00]Original version"
+    )
+
+
+def test_pick_best_synced_lyrics_accepts_closest_duration_when_query_is_not_given():
+    results = [{"syncedLyrics": "[00:00.00]Original version", "duration": 210, "artistName": "Anyone"}]
+
+    assert _pick_best_synced_lyrics(results, duration_seconds=212) == "[00:00.00]Original version"
+
+
 def test_pick_best_synced_lyrics_ignores_results_without_synced_lyrics():
     results = [{"plainLyrics": "no timing here"}, {"syncedLyrics": "[00:00.00]Timed"}]
 

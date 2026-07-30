@@ -1,7 +1,8 @@
 import type { NoteEvent } from '../types/note'
 
-// Widened from 50 -> 70 in the "reduce difficulty" pass, then to 80 on further request.
-const CENTS_TOLERANCE = 80
+// Widened from 50 -> 70 -> 80 across earlier "reduce difficulty" passes, then to 100 (a full
+// semitone either way) on further request.
+const CENTS_TOLERANCE = 100
 
 /** Distance in cents between two pitches' *pitch classes* (octave-agnostic), 0-600. */
 export function pitchClassDistanceCents(a: number, b: number): number {
@@ -38,11 +39,11 @@ export function accuracyFraction(accuracy: NoteAccuracy): number {
   return accuracy.totalCount === 0 ? 0 : accuracy.hitCount / accuracy.totalCount
 }
 
-// Lowered from 0.5 -- see the "reduce difficulty" pass in NOTES.md.
-const NOTE_HIT_FRACTION_THRESHOLD = 0.4
+// Lowered from 0.5 -> 0.4 -> 0.35 across "reduce difficulty" passes -- see NOTES.md.
+const NOTE_HIT_FRACTION_THRESHOLD = 0.35
 
-/** Whether a note counts as "hit" -- matched pitch for at least half of the samples taken while
- * it was active. A note with no samples at all (never sung) is not a hit. */
+/** Whether a note counts as "hit" -- matched pitch for at least `NOTE_HIT_FRACTION_THRESHOLD` of
+ * the samples taken while it was active. A note with no samples at all (never sung) is not a hit. */
 export function isNoteHit(accuracy: NoteAccuracy): boolean {
   return accuracy.totalCount > 0 && accuracyFraction(accuracy) >= NOTE_HIT_FRACTION_THRESHOLD
 }

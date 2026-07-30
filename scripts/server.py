@@ -16,17 +16,20 @@ Usage:
     venv/Scripts/python.exe scripts/server.py
 """
 import json
+import re
 import shutil
 import sys
 import tempfile
 import threading
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -34,10 +37,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from audio_pipeline.download import download_audio, probe_title  # noqa: E402
 from audio_pipeline.pipeline import is_cached, process_song, slugify  # noqa: E402
+from audio_pipeline.transcode import transcode_to_mp3  # noqa: E402
 from publish_song import publish_song  # noqa: E402
 
 CACHE_DIR = Path("cache")
 PUBLIC_DIR = Path("frontend/public/cache")
+RECORDINGS_DIR = Path("recordings")
+SCORES_DIR = Path("scores")
 
 
 @dataclass
@@ -174,6 +180,15 @@ class CreateJobRequest(BaseModel):
     language: Literal["en", "yue"] | None = None
 
 
+class SubmitScoreRequest(BaseModel):
+    song_id: str
+    score: int
+
+
+class SetStarredRequest(BaseModel):
+    starred: bool
+
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -218,12 +233,19 @@ def list_songs() -> dict:
                 continue
             title = entry.name
             processed_at = None
+            starred = False
             meta_path = CACHE_DIR / entry.name / "meta.json"
             if meta_path.exists():
                 meta = json.loads(meta_path.read_text())
                 title = meta.get("title") or entry.name
                 processed_at = meta.get("processed_at")
-            songs.append({"slug": entry.name, "title": title, "processed_at": processed_at})
+                starred = bool(meta.get("starred", False))
+            songs.append({
+                "slug": entry.name,
+                "title": title,
+                "processed_at": processed_at,
+                "starred": starred,
+            })
     return {"songs": songs}
 
 
@@ -243,6 +265,235 @@ def delete_song(slug: str) -> dict:
         shutil.rmtree(cache_dir)
 
     return {"deleted": slug}
+
+
+@app.put("/api/songs/{slug}/starred")
+def set_song_starred(slug: str, request: SetStarredRequest) -> dict:
+    """Star/unstar a cached song so it can be pinned to the top of the "My
+    songs" library list (sorting is left to the frontend, same convention as
+    GET /api/songs). Persisted in meta.json alongside the title, creating it
+    if the song was published before meta.json existed (see
+    test_list_songs_falls_back_to_slug_when_meta_is_missing).
+    """
+    public_dir = _song_dir(PUBLIC_DIR, slug)
+    if not public_dir.exists():
+        raise HTTPException(status_code=404, detail="Unknown song")
+
+    cache_dir = _song_dir(CACHE_DIR, slug)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    meta_path = cache_dir / "meta.json"
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    meta["starred"] = request.starred
+    meta_path.write_text(json.dumps(meta, indent=2))
+
+    return {"slug": slug, "starred": request.starred}
+
+
+def _recording_title(slug: str) -> str:
+    """Human-readable title for a recording's song, read from the same
+    meta.json `_sync_meta_title` above keeps in sync -- falls back to the
+    raw slug if the song has no cached title (or was deleted since).
+    """
+    meta_path = CACHE_DIR / slug / "meta.json"
+    if meta_path.exists():
+        meta = json.loads(meta_path.read_text())
+        if meta.get("title"):
+            return meta["title"]
+    return slug
+
+
+def _parse_recording_filename(path: Path) -> tuple[str, int] | None:
+    """Recordings are saved on disk as `<slug>__<epoch-seconds>.mp3` -- parses
+    that back into its parts, or None for a file that doesn't match (e.g. a
+    stray file dropped into RECORDINGS_DIR by hand).
+    """
+    slug, separator, epoch_part = path.stem.rpartition("__")
+    if not separator or not epoch_part.isdigit():
+        return None
+    return slug, int(epoch_part)
+
+
+def _recording_download_name(slug: str, epoch_seconds: int) -> str:
+    """The name to hand the browser for a recording download -- the song's
+    title followed by when it was recorded, per the requested "song name,
+    then the timestamp" format. Sanitized for filesystem-unsafe characters
+    since real song titles (e.g. from a YouTube title) can contain them.
+    """
+    title = _recording_title(slug)
+    safe_title = re.sub(r'[\\/:*?"<>|]', "_", title).strip() or slug
+    recorded_at = datetime.fromtimestamp(epoch_seconds, tz=timezone.utc)
+    return f"{safe_title}-{recorded_at.strftime('%Y-%m-%d-%H%M%S')}.mp3"
+
+
+def _recording_path(filename: str) -> Path:
+    """Resolve `filename` under RECORDINGS_DIR, rejecting anything (`../etc`,
+    absolute paths, etc.) that would resolve outside of it -- same guard as
+    `_song_dir` above, since this filename comes straight from a URL path.
+    """
+    base_resolved = RECORDINGS_DIR.resolve()
+    candidate = (base_resolved / filename).resolve()
+    if candidate.parent != base_resolved:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    return candidate
+
+
+@app.post("/api/recordings/mp3")
+async def render_recording_mp3(request: Request, song_id: str = "recording") -> FileResponse:
+    """Transcode a recorded webm blob (the browser's MediaRecorder output --
+    already mixed voice + instrumental client-side, see
+    frontend/src/hooks/useRecording.ts) into an mp3, save it under
+    RECORDINGS_DIR so it shows up in the "My recordings" list later, and
+    return it directly so the browser can also download it immediately.
+    """
+    webm_bytes = await request.body()
+    if not webm_bytes:
+        raise HTTPException(status_code=400, detail="Empty recording")
+
+    slug = slugify(song_id)
+    recorded_at = datetime.now(timezone.utc)
+    epoch_seconds = int(recorded_at.timestamp())
+    RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
+    saved_path = RECORDINGS_DIR / f"{slug}__{epoch_seconds}.mp3"
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        input_path = Path(tmp_dir) / "input.webm"
+        input_path.write_bytes(webm_bytes)
+        try:
+            mp3_path = transcode_to_mp3(input_path, Path(tmp_dir))
+        except RuntimeError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        shutil.copy(mp3_path, saved_path)
+
+    return FileResponse(
+        saved_path,
+        media_type="audio/mpeg",
+        filename=_recording_download_name(slug, epoch_seconds),
+    )
+
+
+@app.get("/api/recordings")
+def list_recordings() -> dict:
+    """List saved recordings for the "My recordings" screen -- sorting is
+    left to the frontend (same convention as GET /api/songs above).
+    """
+    recordings = []
+    if RECORDINGS_DIR.exists():
+        for entry in RECORDINGS_DIR.glob("*.mp3"):
+            parsed = _parse_recording_filename(entry)
+            if parsed is None:
+                continue
+            slug, epoch_seconds = parsed
+            recordings.append({
+                "filename": entry.name,
+                "slug": slug,
+                "title": _recording_title(slug),
+                "recorded_at": datetime.fromtimestamp(epoch_seconds, tz=timezone.utc).isoformat(),
+            })
+    return {"recordings": recordings}
+
+
+@app.get("/api/recordings/{filename}")
+def download_recording(filename: str) -> FileResponse:
+    path = _recording_path(filename)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Unknown recording")
+
+    parsed = _parse_recording_filename(path)
+    download_name = _recording_download_name(*parsed) if parsed else path.name
+    return FileResponse(path, media_type="audio/mpeg", filename=download_name)
+
+
+@app.delete("/api/recordings/{filename}")
+def delete_recording(filename: str) -> dict:
+    """Remove a saved recording from RECORDINGS_DIR (the "My recordings"
+    screen's delete action) -- same not-found/path-escape guards as
+    download_recording above, via the shared `_recording_path` helper.
+    """
+    path = _recording_path(filename)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Unknown recording")
+    path.unlink()
+    return {"deleted": filename}
+
+
+def _score_path(slug: str) -> Path:
+    """Resolve scores/<slug>.json, rejecting anything (`../etc`, absolute
+    paths, etc.) that would resolve outside of SCORES_DIR -- same guard as
+    `_song_dir`/`_recording_path` above, since slug comes from the POST
+    /api/scores request body.
+    """
+    base_resolved = SCORES_DIR.resolve()
+    candidate = (base_resolved / f"{slug}.json").resolve()
+    if candidate.parent != base_resolved:
+        raise HTTPException(status_code=400, detail="Invalid slug")
+    return candidate
+
+
+@app.post("/api/scores")
+def submit_score(request: SubmitScoreRequest) -> dict:
+    """Record a completed play-through's score against `scores/<slug>.json`,
+    updating the running best if beaten. Returns the updated record plus
+    `is_new_best` and `previous_best` so the frontend can render the
+    "New high score! (was X%)" banner in one round trip, without a second
+    GET to fetch what the old best used to be.
+    """
+    slug = slugify(request.song_id)
+    SCORES_DIR.mkdir(parents=True, exist_ok=True)
+    path = _score_path(slug)
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Serialize read-modify-write per slug -- same lock dict _run_job uses to
+    # avoid two jobs stomping on the same cache/<slug>/, reused here since a
+    # double-submit (e.g. a flaky retry, or two tabs open on the same song)
+    # racing on scores/<slug>.json has the identical shape of problem.
+    with _lock_for_slug(slug):
+        if path.exists():
+            record = json.loads(path.read_text())
+        else:
+            record = {
+                "slug": slug,
+                "best_score": None,
+                "best_achieved_at": None,
+                "play_count": 0,
+                "last_played_at": None,
+            }
+
+        previous_best = record["best_score"]
+        is_new_best = previous_best is None or request.score > previous_best
+
+        record["play_count"] += 1
+        record["last_played_at"] = now
+        if is_new_best:
+            record["best_score"] = request.score
+            record["best_achieved_at"] = now
+
+        path.write_text(json.dumps(record, indent=2))
+
+    return {**record, "is_new_best": is_new_best, "previous_best": previous_best}
+
+
+@app.get("/api/scores")
+def list_scores() -> dict:
+    """List saved scores for the "High Scores" screen -- sorting and badge
+    computation are left to the frontend (same convention as GET /api/songs
+    / GET /api/recordings above). Title is resolved fresh from
+    cache/<slug>/meta.json each time, not stored in the score file itself, so
+    a later title edit (_sync_meta_title) never leaves a score record stale.
+    """
+    scores = []
+    if SCORES_DIR.exists():
+        for entry in SCORES_DIR.glob("*.json"):
+            slug = entry.stem
+            record = json.loads(entry.read_text())
+            scores.append({
+                "slug": slug,
+                "title": _recording_title(slug),
+                "best_score": record.get("best_score"),
+                "best_achieved_at": record.get("best_achieved_at"),
+                "play_count": record.get("play_count", 0),
+                "last_played_at": record.get("last_played_at"),
+            })
+    return {"scores": scores}
 
 
 if __name__ == "__main__":

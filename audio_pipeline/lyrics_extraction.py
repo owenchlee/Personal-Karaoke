@@ -11,6 +11,7 @@ stem whenever no online match is found, so the app still works fully offline
 audio_pipeline.device), CPU otherwise.
 """
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -22,6 +23,7 @@ from faster_whisper.audio import decode_audio
 from faster_whisper.transcribe import Segment
 
 from audio_pipeline.device import get_device
+from audio_pipeline.forced_alignment import align_tokens
 from audio_pipeline.lyrics_lookup import fetch_synced_lyrics
 from audio_pipeline.text_script import has_unsupported_script
 
@@ -54,10 +56,21 @@ def _detect_language(model: WhisperModel, audio) -> str:
     Runs Whisper's normal language detection, then picks whichever of the
     two supported languages it favored -- rather than trusting its raw top
     pick, which could be any of the ~100 languages it knows.
+
+    Measured directly on a real Cantonese song: the model's own "yue" token
+    scored effectively zero (didn't even appear in the returned
+    probabilities) while generic "zh" scored 0.64 -- exactly the mislabeling
+    the module comment above already warned about -- leaving "en" (a mere
+    0.06) to "win" a naive comparison of just the two supported labels. Fold
+    "zh" into "yue"'s candidate score before comparing, so a strong Chinese-
+    family signal isn't lost just because the model didn't specifically use
+    the "yue" token for it.
     """
     _, _, all_language_probs = model.detect_language(audio=audio, vad_filter=True)
     probabilities = dict(all_language_probs)
-    return max(_SUPPORTED_LANGUAGES, key=lambda lang: probabilities.get(lang, 0.0))
+    yue_score = max(probabilities.get("yue", 0.0), probabilities.get("zh", 0.0))
+    en_score = probabilities.get("en", 0.0)
+    return "yue" if yue_score >= en_score else "en"
 
 
 @dataclass
@@ -241,155 +254,74 @@ def _rms(audio, sampling_rate: int, start_s: float, end_s: float) -> float:
     return float(np.sqrt(np.mean(np.asarray(segment, dtype=np.float64) ** 2)))
 
 
-# lrclib matches a query by title text and picks whichever result's *total duration* is closest
-# to the local audio's (see lyrics_lookup._pick_best_synced_lyrics) -- that says nothing about
-# whether its line timestamps are actually anchored to the same point in the song as this specific
-# video. A video with a longer/shorter intro than whatever release lrclib's lines were timed
-# against reads as a constant early/late offset across every line (confirmed directly: a real
-# video's vocal stem had zero energy until 3.75s, but lrclib's fetched first word was timestamped
-# at 2.7s -- lyrics visibly leading the actual singing by ~1s for the whole song). Re-anchor the
-# fetched timestamps to this audio's own measured vocal onset rather than trusting them as-is.
-_ONSET_STEP_SECONDS = 0.05
-_ONSET_WINDOW_SECONDS = 0.2
-_ONSET_RMS_GATE = 0.01  # same silence/singing-energy gate family as melody_extraction's own
-_ONSET_SEARCH_MARGIN_SECONDS = 10.0  # keep searching this far past the reported first-word time too, in case the fetched timestamps run late rather than early
-_ONSET_MIN_SEARCH_SECONDS = 20.0
-# Below this, treat the discrepancy as ordinary word-lead (consonant before voiced pitch, etc.)
-# rather than a real intro-length mismatch, and leave the fetched timestamps alone.
-_MIN_CORRECTION_SECONDS = 0.35
-# A larger implied shift is more likely a bad onset detection (an early breath, percussion bleed)
-# than a genuine intro mismatch -- safer to leave the fetched timestamps uncorrected than risk
-# shifting a whole song's lyrics on a false signal.
-_MAX_CORRECTION_SECONDS = 15.0
-
-# A constant-offset shift (above) only fixes a mismatched intro length -- it assumes lrclib's line
-# timing otherwise runs at the *same pace* as this video throughout. Reported symptom that doesn't
-# fit that model: lyrics drifting further behind as the song goes on ("the song is faster than the
-# lyrics"), which a single offset can't produce or fix -- that shape only comes from a genuine
-# tempo/pacing mismatch between whatever release lrclib timed (a different edit, a slightly
-# different mix speed) and this specific video. Fix: also detect the *last* moment the vocal stem
-# has real singing energy, near the reported last word's end, and fit a two-point affine map
-# (scale + offset) between (first word start -> first detected onset) and (last word end -> last
-# detected activity) instead of assuming scale=1. A single offset is still the right model when the
-# two-point fit isn't trustworthy (see `_fit_time_correction`), so that path is kept as the fallback
-# rather than replaced.
-_LAST_ACTIVITY_SEARCH_MARGIN_SECONDS = 15.0
-# A real tempo mismatch between two releases of the same song is a small percentage, not a gross
-# difference -- bound the fitted scale to a generous-but-sane band so a bad end-of-song detection
-# (trailing applause/chatter read as "still singing", a mistimed last line) can't silently stretch
-# the whole song's lyrics into nonsense. Outside this band, fall back to the single-offset model.
-_MIN_PLAUSIBLE_SCALE = 0.9
-_MAX_PLAUSIBLE_SCALE = 1.1
+# lrclib only gives line-level timestamps; word timing within a line is a linear character-
+# weighted guess (see lyrics_lookup._distribute_words), and even the line timestamps themselves
+# belong to whatever release lrclib matched by title, not necessarily this specific video (a
+# different intro length, edit, or mix speed). An earlier approach tried to *correct* those
+# reported timestamps by fitting an intro-offset + proportional-drift model against the vocal
+# stem's own onset/last-activity energy -- workable for a pure linear mismatch, but it could only
+# ever approximate a different release's timing, not measure this one. Force-aligning the same
+# (known-correct) text directly against this audio via `forced_alignment.align_tokens` measures it
+# instead, so this replaces that correction step entirely rather than adjusting it further.
+_CJK_RE = re.compile("[一-鿿]")  # same range as lyrics_lookup._CJK_RE
 
 
-def _find_first_vocal_onset(audio, sampling_rate: int, search_seconds: float) -> float | None:
-    """First time offset where the vocal stem has sustained singing-level energy, or ``None`` if
-    none is found before ``search_seconds``.
+def _language_of_words(words: list[dict]) -> str:
+    """Cantonese lyrics are entirely CJK-script tokens (`lyrics_lookup._tokenize_line` splits them
+    character-by-character); a single CJK character anywhere is enough to tell them apart from
+    English, since a song's lyrics are never a mix of the two supported languages.
     """
-    t = 0.0
-    while t + _ONSET_WINDOW_SECONDS <= search_seconds:
-        if _rms(audio, sampling_rate, t, t + _ONSET_WINDOW_SECONDS) >= _ONSET_RMS_GATE:
-            return t
-        t += _ONSET_STEP_SECONDS
-    return None
+    return "yue" if any(_CJK_RE.search(word["word"]) for word in words) else "en"
 
 
-def _find_last_vocal_activity(
-    audio, sampling_rate: int, search_start_seconds: float
-) -> float | None:
-    """Last time offset (window end) where the vocal stem still has sustained singing-level energy,
-    scanning from ``search_start_seconds`` to the end of the audio -- the mirror of
-    `_find_first_vocal_onset`, used to anchor the *end* of the fetched lyrics' timing to this
-    audio's actual last sung moment instead of trusting the reported end. Returns ``None`` if no
-    singing-level energy is found anywhere in that span.
-    """
-    duration = len(audio) / sampling_rate
-    t = max(0.0, search_start_seconds)
-    last_active_end = None
-    while t + _ONSET_WINDOW_SECONDS <= duration:
-        if _rms(audio, sampling_rate, t, t + _ONSET_WINDOW_SECONDS) >= _ONSET_RMS_GATE:
-            last_active_end = t + _ONSET_WINDOW_SECONDS
-        t += _ONSET_STEP_SECONDS
-    return last_active_end
-
-
-def _fit_time_correction(
-    first_reported: float,
-    first_detected: float,
-    last_reported: float,
-    last_detected: float | None,
+def _interpolate_background_range(
+    old_start: float, old_end: float, old_words: list[dict], new_words: list[dict],
 ) -> tuple[float, float]:
-    """Fit ``(scale, offset)`` so ``true_time = scale * reported_time + offset``, anchored at the
-    first word's onset and, when available and trustworthy, also the last word's end -- so a
-    genuine tempo/pacing drift across the song is corrected proportionally instead of assuming a
-    single constant shift applies everywhere (see the module comment above
-    ``_LAST_ACTIVITY_SEARCH_MARGIN_SECONDS``).
-
-    Falls back to a pure offset (``scale=1``) whenever the last-word anchor is missing, the two
-    reported timestamps are too close together for a stable slope estimate, or the fitted scale
-    falls outside the plausible band -- a bad two-point fit is worse than no fit at all.
+    """Re-time a background-vocal range (originally in lrclib's own, now-distrusted time
+    coordinates -- see the module comment above ``_CJK_RE``) using the *forced-aligned* neighbors
+    immediately before/after it in the original word order, rather than trusting its raw lrclib
+    timestamp. ``old_words``/``new_words`` are the same list before/after alignment, so a position
+    match between them carries over directly -- no re-detection needed.
     """
-    span = last_reported - first_reported
-    if last_detected is not None and span > _ONSET_WINDOW_SECONDS:
-        scale = (last_detected - first_detected) / span
-        if _MIN_PLAUSIBLE_SCALE <= scale <= _MAX_PLAUSIBLE_SCALE:
-            offset = first_detected - scale * first_reported
-            return scale, offset
+    prev_end = None
+    next_start = None
+    for old_word, new_word in zip(old_words, new_words):
+        if old_word["end"] <= old_start:
+            prev_end = new_word["end"]
+        if next_start is None and old_word["start"] >= old_end:
+            next_start = new_word["start"]
 
-    return 1.0, first_detected - first_reported
+    if prev_end is not None and next_start is not None:
+        return prev_end, next_start
+    span = old_end - old_start
+    if prev_end is not None:
+        return prev_end, prev_end + span
+    if next_start is not None:
+        return max(0.0, next_start - span), next_start
+    return old_start, old_end  # no real-word anchor on either side -- nothing better to fall back to
 
 
-def _align_synced_lyrics_to_audio(
+def _force_align_synced_lyrics(
     words: list[dict],
     background_ranges: list[tuple[float, float]],
     vocal_stem_path: Path,
 ) -> tuple[list[dict], list[tuple[float, float]]]:
-    """Re-anchor lrclib-fetched ``words`` (and their matching ``background_ranges``, see
-    ``lyrics_lookup.fetch_synced_lyrics``) to this audio's own measured vocal timing, correcting for
-    both an intro-length mismatch and a proportional tempo/pacing drift between whatever release
-    lrclib timed its lines against and this specific source video (see the module comment above
-    ``_ONSET_STEP_SECONDS`` and ``_LAST_ACTIVITY_SEARCH_MARGIN_SECONDS``).
+    """Replace lrclib-fetched ``words``' guessed timing with real per-word timestamps measured
+    directly against this audio (see the module comment above ``_CJK_RE``), and re-time
+    ``background_ranges`` (see ``lyrics_lookup.fetch_synced_lyrics``) from the newly-aligned
+    neighboring words rather than their own now-distrusted raw timestamps.
     """
     if not words:
         return words, background_ranges
 
-    audio, sampling_rate = sf.read(vocal_stem_path)
-    if audio.ndim > 1:
-        audio = audio.mean(axis=1)
-    audio_duration = len(audio) / sampling_rate
-
-    search_seconds = min(
-        audio_duration, max(_ONSET_MIN_SEARCH_SECONDS, words[0]["start"] + _ONSET_SEARCH_MARGIN_SECONDS)
-    )
-    detected_onset = _find_first_vocal_onset(audio, sampling_rate, search_seconds)
-    if detected_onset is None:
-        return words, background_ranges
-
-    last_word_end = words[-1]["end"]
-    last_search_start = max(0.0, last_word_end - _LAST_ACTIVITY_SEARCH_MARGIN_SECONDS)
-    detected_last_activity = _find_last_vocal_activity(audio, sampling_rate, last_search_start)
-
-    scale, offset = _fit_time_correction(
-        words[0]["start"], detected_onset, last_word_end, detected_last_activity
-    )
-
-    implied_start_shift = scale * words[0]["start"] + offset - words[0]["start"]
-    if abs(implied_start_shift) < _MIN_CORRECTION_SECONDS or abs(implied_start_shift) > _MAX_CORRECTION_SECONDS:
-        return words, background_ranges
-
-    shifted_words = [
-        {
-            **word,
-            "start": round(max(0.0, scale * word["start"] + offset), 4),
-            "end": round(max(0.0, scale * word["end"] + offset), 4),
-        }
-        for word in words
-    ]
-    shifted_ranges = [
-        (round(max(0.0, scale * start + offset), 4), round(max(0.0, scale * end + offset), 4))
+    tokens = [word["word"] for word in words]
+    aligned = align_tokens(tokens, vocal_stem_path, _language_of_words(words))
+    new_words = [{**word, **timing} for word, timing in zip(words, aligned)]
+    new_ranges = [
+        _interpolate_background_range(start, end, words, new_words)
         for start, end in background_ranges
     ]
-    return shifted_words, shifted_ranges
+    return new_words, new_ranges
 
 
 def _normalize_word(text: str) -> str:
@@ -457,6 +389,70 @@ def _repair_energetic_gaps(
     return repaired
 
 
+def _find_energetic_gaps(
+    audio, sampling_rate: int, words: list[dict], background_ranges: list[tuple[float, float]]
+) -> list[tuple[float, float]]:
+    """Same gap-detection condition as `_repair_energetic_gaps` (long enough, and real singing
+    energy in the vocal stem, not silence) but without needing a model -- lets a caller decide
+    whether loading Whisper to repair anything is worth it before paying that cost. Skips any gap
+    that overlaps a `background_ranges` span, since those are deliberately-stripped backing/ad-lib
+    vocals, not something to recover.
+    """
+    if len(words) < 2:
+        return []
+    gaps = []
+    for prev_word, word in zip(words, words[1:]):
+        gap_start, gap_end = prev_word["end"], word["start"]
+        if gap_end - gap_start <= _GAP_REPAIR_THRESHOLD_SECONDS:
+            continue
+        if any(gap_start < end and gap_end > start for start, end in background_ranges):
+            continue
+        if _rms(audio, sampling_rate, gap_start, gap_end) >= _GAP_SINGING_RMS_GATE:
+            gaps.append((gap_start, gap_end))
+    return gaps
+
+
+# lrclib's line-level text has no defense at all against a real sung passage this specific video
+# has that the fetched LRC just doesn't cover (e.g. an ad-lib/interlude the community transcription
+# skipped) -- unlike the local-transcription path, which already recovers exactly this case via
+# `_repair_energetic_gaps`. Measured directly on a real cached song
+# (`priscilla-chan-night-flight-english-yale-romanization`): a 25.76s stretch had vocal-stem RMS
+# (0.01-0.05) comparable to the song's own median non-silent RMS (~0.07) with zero lrclib coverage --
+# the note highway (independently derived from the same vocal stem) correctly showed notes there the
+# whole time, while the lyrics display had nothing to show, reading as frozen/stuck. Reuse the same
+# repair here rather than leaving lrclib-sourced lyrics with no equivalent defense.
+def _repair_synced_lyrics_gaps(
+    words: list[dict],
+    background_ranges: list[tuple[float, float]],
+    vocal_stem_path: Path,
+    language: str | None,
+) -> list[dict]:
+    """Fills real-singing gaps in lrclib-sourced ``words`` the same way ``_repair_energetic_gaps``
+    already does for local transcription. Only loads Whisper at all if a cheap, model-free RMS scan
+    (`_find_energetic_gaps`) finds at least one gap worth repairing, so a song whose lrclib lyrics
+    already cover the whole song -- the common case -- stays on the fast lookup-only path.
+    """
+    if not words:
+        return words
+
+    audio, sampling_rate = sf.read(vocal_stem_path)
+    if audio.ndim > 1:
+        audio = audio.mean(axis=1)
+    if not _find_energetic_gaps(audio, sampling_rate, words, background_ranges):
+        return words
+
+    device = get_device()
+    compute_type = "float16" if device == "cuda" else "int8"
+    model = WhisperModel(_MODEL_SIZE, device=device, compute_type=compute_type)
+    model_audio = decode_audio(
+        str(vocal_stem_path), sampling_rate=model.feature_extractor.sampling_rate
+    )
+    resolved_language = language or _detect_language(model, model_audio)
+    return _repair_energetic_gaps(
+        model, model_audio, model.feature_extractor.sampling_rate, resolved_language, words
+    )
+
+
 def extract_lyrics(
     vocal_stem_path: str | Path,
     output_dir: str | Path,
@@ -498,9 +494,10 @@ def extract_lyrics(
         fetched = fetch_synced_lyrics(lyrics_query, duration_seconds=duration_seconds)
         if fetched is not None:
             words, background_ranges = fetched
-            words, background_ranges = _align_synced_lyrics_to_audio(
+            words, background_ranges = _force_align_synced_lyrics(
                 words, background_ranges, vocal_stem_path
             )
+            words = _repair_synced_lyrics_gaps(words, background_ranges, vocal_stem_path, language)
             if on_progress:
                 on_progress(1.0)
 

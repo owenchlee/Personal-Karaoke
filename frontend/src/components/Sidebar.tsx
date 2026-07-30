@@ -1,24 +1,22 @@
 import { useEffect } from 'react'
+import { CloseIcon } from './icons'
 
 interface SidebarProps {
   open: boolean
   onClose: () => void
+  activeScreen: string | null
 }
 
-function CloseIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M6 6l12 12M18 6L6 18"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-    </svg>
-  )
-}
+const NAV_LINKS: Array<{ href: string; screen: string | null; label: string }> = [
+  { href: '/', screen: null, label: 'Play' },
+  { href: '/?screen=load', screen: 'load', label: 'Load a song' },
+  { href: '/?screen=songs', screen: 'songs', label: 'Cached songs' },
+  { href: '/?screen=recordings', screen: 'recordings', label: 'My recordings' },
+  { href: '/?screen=highscores', screen: 'highscores', label: 'High Scores' },
+  { href: '/?screen=calibrate', screen: 'calibrate', label: 'Mic calibration' },
+]
 
-function Sidebar({ open, onClose }: SidebarProps) {
+function Sidebar({ open, onClose, activeScreen }: SidebarProps) {
   useEffect(() => {
     if (!open) return
 
@@ -52,15 +50,19 @@ function Sidebar({ open, onClose }: SidebarProps) {
           </button>
         </div>
         <nav className="sidebar-nav">
-          <a className="sidebar-nav-link" href="/">
-            Play
-          </a>
-          <a className="sidebar-nav-link" href="/?screen=load">
-            Load a song
-          </a>
-          <a className="sidebar-nav-link" href="/?screen=songs">
-            Cached songs
-          </a>
+          {NAV_LINKS.map((link) => {
+            const isActive = link.screen === activeScreen
+            return (
+              <a
+                key={link.href}
+                className={`sidebar-nav-link${isActive ? ' sidebar-nav-link--active' : ''}`}
+                href={link.href}
+                aria-current={isActive ? 'page' : undefined}
+              >
+                {link.label}
+              </a>
+            )
+          })}
         </nav>
       </aside>
     </>

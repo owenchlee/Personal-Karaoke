@@ -1,25 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { getStageLabel } from '../game/jobStages'
 import type { JobState } from '../types/job'
+import { LinkIcon } from './icons'
 
 const POLL_INTERVAL_MS = 2000
 
 interface LoadSongFormProps {
   onLoaded: (slug: string) => void
-}
-
-function LinkIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M9 12h6M10 17H7a5 5 0 0 1 0-10h3M14 7h3a5 5 0 0 1 0 10h-3"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
 }
 
 type LanguageOption = '' | 'en' | 'yue'
@@ -98,7 +85,7 @@ function LoadSongForm({ onLoaded }: LoadSongFormProps) {
       <div className="input-row">
         <div className="input-with-icon">
           <span className="input-icon">
-            <LinkIcon />
+            <LinkIcon size={18} />
           </span>
           <input
             id="song-link"

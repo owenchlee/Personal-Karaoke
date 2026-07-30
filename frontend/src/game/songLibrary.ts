@@ -1,4 +1,5 @@
 import type { Song } from '../types/song'
+import { MONTHS } from './dateFormat'
 
 /**
  * Newest-first by `processed_at`. Songs with no timestamp (e.g. published via
@@ -16,9 +17,17 @@ export function sortSongsByRecency(songs: Song[]): Song[] {
   })
 }
 
-const MONTHS = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-]
+/**
+ * Orders the library for display: starred songs first, then unstarred --
+ * `sortSongsByRecency` is used as the tiebreaker within each group so
+ * recency ordering is preserved on either side of the starred/unstarred
+ * split.
+ */
+export function sortSongLibrary(songs: Song[]): Song[] {
+  const starred = songs.filter((song) => song.starred)
+  const unstarred = songs.filter((song) => !song.starred)
+  return [...sortSongsByRecency(starred), ...sortSongsByRecency(unstarred)]
+}
 
 /**
  * Formats an ISO `processed_at` timestamp for display next to a song in the

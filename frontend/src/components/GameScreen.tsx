@@ -3,16 +3,23 @@ import type { NoteEvent } from '../types/note'
 import type { LyricWord } from '../types/lyrics'
 import LyricsDisplay from './LyricsDisplay'
 import NoteHighway from './NoteHighway'
+import SongLibrary from './SongLibrary'
 import { midiToNoteName } from '../game/coords'
 import { accuracyFraction } from '../game/scoring'
 import { useLivePitchIndicator } from '../hooks/useLivePitchIndicator'
 import { useMicPitch } from '../hooks/useMicPitch'
+import { useRecording } from '../hooks/useRecording'
 import { useScoring } from '../hooks/useScoring'
+import type { ScoreSubmissionResult } from '../types/score'
 
-const DEFAULT_SONG_ID = 'test-song'
+function getSongId(): string | null {
+  return new URLSearchParams(window.location.search).get('song')
+}
 
-function getSongId(): string {
-  return new URLSearchParams(window.location.search).get('song') ?? DEFAULT_SONG_ID
+function selectSong(slug: string) {
+  // Hard navigation so the whole screen (and every hook keyed on songId) starts fresh for the
+  // newly chosen song, rather than trying to hot-swap state mid-render.
+  window.location.href = `/?song=${encodeURIComponent(slug)}`
 }
 
 type LoadState = 'loading' | 'loaded' | 'error'
@@ -43,11 +50,12 @@ function GameScreen() {
   const [lyrics, setLyrics] = useState<LyricWord[]>([])
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [finalScore, setFinalScore] = useState<number | null>(null)
+  const [scoreResult, setScoreResult] = useState<ScoreSubmissionResult | null>(null)
   const [debug, setDebug] = useState(false)
   const [recentNotes, setRecentNotes] = useState<RecentNoteStat[]>([])
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  const { status: micStatus, start: startMic, latestSampleRef } = useMicPitch(audioRef)
+  const { status: micStatus, start: startMic, latestSampleRef, streamRef: micStreamRef } = useMicPitch(audioRef)
   const { runningScore, getFinalScore, reset: resetScoring, accuraciesRef } = useScoring({
     audioRef,
     notes,
@@ -59,8 +67,11 @@ function GameScreen() {
     notes,
     latestSampleRef,
   })
+  const recording = useRecording({ audioRef, micStreamRef, songId: songId ?? '' })
 
   useEffect(() => {
+    if (songId === null) return
+
     let cancelled = false
     setLoadState('loading')
 
@@ -94,9 +105,25 @@ function GameScreen() {
       if (audio.currentTime < 0.5) {
         resetScoring()
         setFinalScore(null)
+        setScoreResult(null)
       }
     }
-    const handleEnded = () => setFinalScore(getFinalScore())
+    const handleEnded = () => {
+      const score = getFinalScore()
+      setFinalScore(score)
+
+      fetch('/api/scores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ song_id: songId, score }),
+      })
+        .then((response) => {
+          if (!response.ok) throw new Error(`Failed to submit score: ${response.status}`)
+          return response.json() as Promise<ScoreSubmissionResult>
+        })
+        .then(setScoreResult)
+        .catch(() => setScoreResult(null))
+    }
 
     audio.addEventListener('play', handlePlay)
     audio.addEventListener('ended', handleEnded)
@@ -133,6 +160,17 @@ function GameScreen() {
     return () => window.clearInterval(intervalId)
   }, [debug, notes, accuraciesRef])
 
+  if (songId === null) {
+    return (
+      <main className="game-screen">
+        <section className="panel">
+          <h2>Choose a song</h2>
+          <SongLibrary onSelect={selectSong} />
+        </section>
+      </main>
+    )
+  }
+
   return (
     <main className="game-screen">
       {loadState === 'loading' && <p className="status-message">Loading song&hellip;</p>}
@@ -157,7 +195,48 @@ function GameScreen() {
                 {micStatus === 'denied' && (
                   <span className="form-error">Mic permission denied or unavailable.</span>
                 )}
-                {micStatus === 'active' && <span className="score-badge">Score: {runningScore}%</span>}
+                {micStatus === 'active' && (
+                  <>
+                    <span className="score-badge">Score: {runningScore}%</span>
+                    {recording.status === 'idle' && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => void recording.start()}
+                      >
+                        Start Recording
+                      </button>
+                    )}
+                    {recording.status === 'recording' && (
+                      <button
+                        type="button"
+                        className="btn btn-secondary recording-active"
+                        onClick={recording.stop}
+                      >
+                        <span className="recording-dot" aria-hidden="true" />
+                        Stop Recording
+                      </button>
+                    )}
+                    {recording.status === 'processing' && <span className="muted">Rendering MP3&hellip;</span>}
+                    {recording.status === 'done' && recording.downloadUrl && (
+                      <>
+                        <a
+                          className="btn btn-primary"
+                          href={recording.downloadUrl}
+                          download={recording.downloadFilename ?? `${songId}-recording.mp3`}
+                        >
+                          Download MP3
+                        </a>
+                        <button type="button" className="btn btn-secondary" onClick={recording.reset}>
+                          Record again
+                        </button>
+                      </>
+                    )}
+                    {recording.status === 'error' && recording.errorMessage && (
+                      <span className="form-error">{recording.errorMessage}</span>
+                    )}
+                  </>
+                )}
                 <label className="debug-toggle">
                   <input
                     type="checkbox"
@@ -195,6 +274,15 @@ function GameScreen() {
             {finalScore !== null && (
               <div className="final-score-banner">
                 <strong>Final score: {finalScore}%</strong>
+                {scoreResult?.is_new_best && (
+                  <div className="final-score-highlight">
+                    🏆 New high score!
+                    {scoreResult.previous_best !== null ? ` (was ${scoreResult.previous_best}%)` : ''}
+                  </div>
+                )}
+                {scoreResult && !scoreResult.is_new_best && (
+                  <div className="final-score-subtext">Best: {scoreResult.best_score}%</div>
+                )}
               </div>
             )}
           </div>

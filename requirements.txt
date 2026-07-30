@@ -38,6 +38,22 @@ yt-dlp>=2024.1.0
 # local transcription -- see audio_pipeline/lyrics_lookup.py.
 requests>=2.31.0
 
+# CTC forced alignment (audio_pipeline/forced_alignment.py): once lrclib gives known-correct
+# lyrics text, these align that text directly against the vocal stem to get real per-word
+# timestamps, instead of trusting/correcting lrclib's own approximate line-level timing. Uses
+# Meta's MMS wav2vec2 CTC model (multilingual, covers English and Cantonese) via `transformers`,
+# romanized through `uroman`, with the actual alignment computed by
+# `torchaudio.functional.forced_align` (already ships with the `torch`/`torchaudio` install this
+# project requires separately -- see the top of this file). Deliberately NOT depending on the
+# `ctc-forced-aligner` PyPI package that implements the same idea end-to-end: its C++ extension has
+# no prebuilt Windows wheel and fails to build here without MSVC Build Tools; this project
+# reimplements the (small, MIT/BSD-licensed) alignment logic directly against torchaudio's already-
+# prebuilt equivalent instead. The default alignment model
+# (MahmoudAshraf/mms-300m-1130-forced-aligner, downloaded from the Hugging Face Hub on first use)
+# is CC-BY-NC 4.0 licensed -- fine for this personal-use project, but not for commercial use.
+transformers>=4.40.0
+uroman>=1.3.0
+
 # Local job server the frontend calls to kick off/poll link-based processing.
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0

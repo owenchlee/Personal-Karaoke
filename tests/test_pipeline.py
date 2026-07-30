@@ -10,7 +10,15 @@ from unittest.mock import patch
 
 import ffmpeg
 
-from audio_pipeline.pipeline import _remove_background_vocal_notes, is_cached, process_song
+import pytest
+
+from audio_pipeline.pipeline import (
+    _remove_background_vocal_notes,
+    _remove_notes_without_lyrics,
+    is_cached,
+    process_song,
+    reprocess_melody_and_lyrics,
+)
 
 
 def _write_synthetic_video(path, duration_s=2.0):
@@ -105,6 +113,43 @@ def test_remove_background_vocal_notes_drops_overlapping_notes(tmp_path):
     assert [note["pitch_midi"] for note in result] == [60, 65]
 
 
+def test_remove_notes_without_lyrics_drops_notes_outside_lyric_coverage(tmp_path):
+    # Single lyric line spanning 10.0-11.0s.
+    lyrics_path = tmp_path / "lyrics.json"
+    lyrics_path.write_text(json.dumps([
+        {"word": "hello", "start": 10.0, "end": 10.4, "line": 0},
+        {"word": "world", "start": 10.6, "end": 11.0, "line": 0},
+    ]))
+
+    notes_path = tmp_path / "notes.json"
+    notes_path.write_text(json.dumps([
+        {"pitch_midi": 60, "onset": 1.0, "offset": 2.0},  # far before the line -- dropped
+        {"pitch_midi": 62, "onset": 10.2, "offset": 10.8},  # inside the line -- kept
+        {"pitch_midi": 64, "onset": 11.3, "offset": 11.4},  # just within the 0.5s pad -- kept
+        {"pitch_midi": 65, "onset": 12.0, "offset": 12.5},  # well past the pad -- dropped
+    ]))
+
+    _remove_notes_without_lyrics(notes_path, lyrics_path)
+
+    result = json.loads(notes_path.read_text())
+    assert [note["pitch_midi"] for note in result] == [62, 64]
+
+
+def test_remove_notes_without_lyrics_drops_all_notes_when_lyrics_empty(tmp_path):
+    lyrics_path = tmp_path / "lyrics.json"
+    lyrics_path.write_text(json.dumps([]))
+
+    notes_path = tmp_path / "notes.json"
+    notes_path.write_text(json.dumps([
+        {"pitch_midi": 60, "onset": 1.0, "offset": 2.0},
+    ]))
+
+    _remove_notes_without_lyrics(notes_path, lyrics_path)
+
+    result = json.loads(notes_path.read_text())
+    assert result == []
+
+
 def test_process_song_reports_stage_progress_via_on_progress_callback(tmp_path):
     cache_dir = tmp_path / "cache"
     fake_video_path = tmp_path / "video.mp4"
@@ -145,3 +190,61 @@ def test_process_song_reports_stage_progress_via_on_progress_callback(tmp_path):
         )
 
     assert progress_seen == ["separating", "extracting_melody", "transcribing_lyrics"]
+
+
+def test_reprocess_melody_and_lyrics_reruns_extraction_from_the_cached_vocal_stem(tmp_path):
+    cache_dir = tmp_path / "cache"
+    song_cache_dir = cache_dir / "my-song"
+    song_cache_dir.mkdir(parents=True)
+    vocals_path = song_cache_dir / "vocals.wav"
+    vocals_path.write_bytes(b"original vocals")
+    instrumental_path = song_cache_dir / "instrumental.wav"
+    instrumental_path.write_bytes(b"original instrumental")
+    (song_cache_dir / "notes.json").write_text(json.dumps([{"pitch_midi": 60, "onset": 0.0, "offset": 1.0}]))
+    (song_cache_dir / "lyrics.json").write_text(json.dumps([{"word": "old", "start": 0.0, "end": 0.5, "line": 0}]))
+    (song_cache_dir / "meta.json").write_text(json.dumps({"song_id": "my-song", "title": "My Song"}))
+
+    fresh_midi_path = tmp_path / "fresh_melody.mid"
+    fresh_midi_path.write_bytes(b"fresh midi")
+    fresh_notes_path = tmp_path / "fresh_notes.json"
+    fresh_notes_path.write_text(json.dumps([{"pitch_midi": 62, "onset": 5.0, "offset": 6.0}]))
+    fresh_lyrics_path = tmp_path / "fresh_lyrics.json"
+    fresh_lyrics_path.write_text(json.dumps([{"word": "new", "start": 5.0, "end": 5.5, "line": 0}]))
+
+    melody_result = type("Melody", (), {"midi_path": fresh_midi_path, "notes_path": fresh_notes_path})()
+    lyrics_result = type(
+        "Lyrics", (), {"lyrics_path": fresh_lyrics_path, "background_vocal_ranges": []}
+    )()
+
+    with (
+        patch("audio_pipeline.pipeline.extract_melody", return_value=melody_result) as mock_melody,
+        patch("audio_pipeline.pipeline.extract_lyrics", return_value=lyrics_result) as mock_lyrics,
+    ):
+        assets = reprocess_melody_and_lyrics(cache_dir, "my-song", lyrics_query="My Song")
+
+    mock_melody.assert_called_once_with(vocals_path, song_cache_dir)
+    assert mock_lyrics.call_args.args[0] == vocals_path
+    assert mock_lyrics.call_args.kwargs["lyrics_query"] == "My Song"
+
+    # instrumental/vocals are left completely untouched -- no re-download, no re-separation
+    assert vocals_path.read_bytes() == b"original vocals"
+    assert instrumental_path.read_bytes() == b"original instrumental"
+    assert assets.vocals_path == vocals_path
+    assert assets.instrumental_path == instrumental_path
+
+    # the cached notes/lyrics/midi are replaced with the freshly-extracted (and re-filtered) ones
+    assert json.loads(assets.notes_path.read_text()) == [{"pitch_midi": 62, "onset": 5.0, "offset": 6.0}]
+    assert json.loads(assets.lyrics_path.read_text()) == [{"word": "new", "start": 5.0, "end": 5.5, "line": 0}]
+    assert assets.midi_path.read_bytes() == b"fresh midi"
+
+    # meta.json's other fields (title) survive; only processed_at is refreshed
+    meta = json.loads((song_cache_dir / "meta.json").read_text())
+    assert meta["title"] == "My Song"
+    assert "processed_at" in meta
+
+
+def test_reprocess_melody_and_lyrics_raises_when_no_cached_stems_exist(tmp_path):
+    cache_dir = tmp_path / "cache"
+
+    with pytest.raises(FileNotFoundError):
+        reprocess_melody_and_lyrics(cache_dir, "never-processed")

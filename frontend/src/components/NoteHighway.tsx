@@ -14,7 +14,8 @@ import {
 import { isNoteHit, type NoteAccuracy } from '../game/scoring'
 import type { LiveIndicatorState } from '../hooks/useLivePitchIndicator'
 
-const CANVAS_WIDTH = 900
+const CANVAS_WIDTH_FALLBACK = 900
+const MIN_CANVAS_WIDTH = 240
 const CANVAS_HEIGHT = 320
 const PLAYHEAD_X = 150
 const MARGIN_TOP = 20
@@ -22,15 +23,6 @@ const MARGIN_BOTTOM = 20
 const NOTE_BAR_HEIGHT = 10
 const PITCH_PILL_WIDTH = 26
 const PITCH_PILL_HEIGHT = 12
-const FUTURE_WINDOW_SECONDS = (CANVAS_WIDTH - PLAYHEAD_X) / DEFAULT_PX_PER_SECOND
-
-// Bars start white and only flip to a hit/missed color once a note has actually finished playing
-// -- coloring it live, while the note is still in progress, made the color flicker back and forth
-// as the cumulative hit fraction crossed the 50% line sample to sample, which read as broken
-// rather than informative.
-const NOTE_COLOR_PENDING = '#f8fafc'
-const NOTE_COLOR_HIT = '#22c55e'
-const NOTE_COLOR_MISSED = '#ef4444'
 
 // The statistically-smoothed midi value from `useLivePitchIndicator` can still step frame-to-frame
 // (a new sample entering/leaving its median window). Easing the on-screen position toward that
@@ -43,6 +35,36 @@ const NOTE_COLOR_MISSED = '#ef4444'
 // the highway rather than tracking it in real time -- see NOTES.md). Nudged back up to 0.08 for
 // a smoother pill now that the lag itself is fixed -- still well under the original 0.1.
 const RENDER_SMOOTHING_TAU_SECONDS = 0.08
+
+interface NoteColors {
+  pending: string
+  hit: string
+  missed: string
+  gridLine: string
+  gridLabel: string
+  playhead: string
+  pitchIndicator: string
+  pitchIndicatorStroke: string
+}
+
+// Canvas can't consume CSS custom properties directly, so colors live as tokens in index.css and
+// get read off the DOM once (and again on a theme change) rather than duplicated as JS literals --
+// that's what lets this highway theme correctly in both light and dark mode instead of always
+// rendering on a hardcoded background.
+function readNoteColors(canvas: HTMLCanvasElement): NoteColors {
+  const style = getComputedStyle(canvas)
+  const read = (name: string) => style.getPropertyValue(name).trim()
+  return {
+    pending: read('--note-pending'),
+    hit: read('--note-hit'),
+    missed: read('--note-missed'),
+    gridLine: read('--note-grid-line'),
+    gridLabel: read('--note-grid-label'),
+    playhead: read('--note-playhead'),
+    pitchIndicator: read('--pitch-indicator'),
+    pitchIndicatorStroke: read('--pitch-indicator-stroke'),
+  }
+}
 
 interface NoteHighwayProps {
   audioRef: React.RefObject<HTMLAudioElement | null>
@@ -60,20 +82,56 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef }: NoteHighw
   useEffect(() => {
     const canvas = canvasRef.current
     const ctx = canvas?.getContext('2d')
-    if (!canvas || !ctx) return
+    const container = canvas?.parentElement
+    if (!canvas || !ctx || !container) return
 
     const pitchRange = getPitchRange(notes)
     const noteIndices = new Map(notes.map((note, index) => [note, index]))
+
+    let colors = readNoteColors(canvas)
+    const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)')
+    const handleThemeChange = () => {
+      colors = readNoteColors(canvas)
+    }
+    darkModeQuery.addEventListener('change', handleThemeChange)
+
+    // Sized to the container's content box (not stretched via CSS width:100%) and rescaled for
+    // devicePixelRatio, so the highway stays crisp at any viewport width/DPR instead of blurring
+    // when a fixed-resolution bitmap gets stretched on narrow or hi-DPI screens.
+    let cssWidth = Math.max(MIN_CANVAS_WIDTH, Math.round(container.clientWidth)) || CANVAS_WIDTH_FALLBACK
+    let dpr = window.devicePixelRatio || 1
+
+    const applyCanvasSize = () => {
+      canvas.width = Math.round(cssWidth * dpr)
+      canvas.height = Math.round(CANVAS_HEIGHT * dpr)
+      canvas.style.width = `${cssWidth}px`
+      canvas.style.height = `${CANVAS_HEIGHT}px`
+    }
+    applyCanvasSize()
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (!entry) return
+      const nextWidth = Math.max(MIN_CANVAS_WIDTH, Math.round(entry.contentRect.width))
+      if (nextWidth !== cssWidth) {
+        cssWidth = nextWidth
+        applyCanvasSize()
+      }
+    })
+    resizeObserver.observe(container)
 
     const draw = (timestamp: number) => {
       const lastTimestamp = lastFrameTimestampRef.current
       const dt = lastTimestamp === null ? 1 / 60 : (timestamp - lastTimestamp) / 1000
       lastFrameTimestampRef.current = timestamp
 
-      const currentTime = audioRef.current?.currentTime ?? 0
+      dpr = window.devicePixelRatio || dpr
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-      ctx.fillStyle = '#0f0f17'
-      ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
+      const currentTime = audioRef.current?.currentTime ?? 0
+      const futureWindowSeconds = (cssWidth - PLAYHEAD_X) / DEFAULT_PX_PER_SECOND
+
+      ctx.clearRect(0, 0, cssWidth, CANVAS_HEIGHT)
 
       // Absolute note-name gridlines -- see the mapping-strategy note on `getPitchRange` in
       // coords.ts: without these, "near the bottom of the highway" only means "the lowest note in
@@ -82,17 +140,17 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef }: NoteHighw
       ctx.textBaseline = 'middle'
       for (const tick of getPitchAxisTicks(pitchRange)) {
         const y = pitchToY(tick, pitchRange, CANVAS_HEIGHT, MARGIN_TOP, MARGIN_BOTTOM)
-        ctx.strokeStyle = 'rgba(148, 163, 184, 0.15)'
+        ctx.strokeStyle = colors.gridLine
         ctx.lineWidth = 1
         ctx.beginPath()
         ctx.moveTo(0, y)
-        ctx.lineTo(CANVAS_WIDTH, y)
+        ctx.lineTo(cssWidth, y)
         ctx.stroke()
-        ctx.fillStyle = 'rgba(148, 163, 184, 0.7)'
+        ctx.fillStyle = colors.gridLabel
         ctx.fillText(midiToNoteName(tick), 4, y)
       }
 
-      ctx.strokeStyle = 'rgba(196, 181, 253, 0.8)'
+      ctx.strokeStyle = colors.playhead
       ctx.lineWidth = 2
       ctx.beginPath()
       ctx.moveTo(PLAYHEAD_X, 0)
@@ -103,19 +161,23 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef }: NoteHighw
         notes,
         currentTime,
         DEFAULT_PAST_BUFFER_SECONDS,
-        FUTURE_WINDOW_SECONDS,
+        futureWindowSeconds,
       )
 
+      // Bars start white and only flip to a hit/missed color once a note has actually finished
+      // playing -- coloring it live, while the note is still in progress, made the color flicker
+      // back and forth as the cumulative hit fraction crossed the 50% line sample to sample, which
+      // read as broken rather than informative.
       for (const note of visibleNotes) {
         const startX = timeToX(note.onset, currentTime, DEFAULT_PX_PER_SECOND, PLAYHEAD_X)
         const endX = timeToX(note.offset, currentTime, DEFAULT_PX_PER_SECOND, PLAYHEAD_X)
         const y = pitchToY(note.pitch_midi, pitchRange, CANVAS_HEIGHT, MARGIN_TOP, MARGIN_BOTTOM)
         const radius = Math.min(NOTE_BAR_HEIGHT / 2, Math.max(endX - startX, 0) / 2)
 
-        let color = NOTE_COLOR_PENDING
+        let color = colors.pending
         const accuracy = accuraciesRef?.current[noteIndices.get(note) ?? -1]
         if (accuracy && note.offset <= currentTime) {
-          color = isNoteHit(accuracy) ? NOTE_COLOR_HIT : NOTE_COLOR_MISSED
+          color = isNoteHit(accuracy) ? colors.hit : colors.missed
         }
 
         ctx.fillStyle = color
@@ -141,8 +203,8 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef }: NoteHighw
           renderedYRef.current += (targetY - renderedYRef.current) * easing
         }
 
-        ctx.fillStyle = '#38bdf8'
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)'
+        ctx.fillStyle = colors.pitchIndicator
+        ctx.strokeStyle = colors.pitchIndicatorStroke
         ctx.lineWidth = 2
         ctx.beginPath()
         ctx.roundRect(
@@ -167,10 +229,12 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef }: NoteHighw
       if (rafRef.current !== null) {
         cancelAnimationFrame(rafRef.current)
       }
+      resizeObserver.disconnect()
+      darkModeQuery.removeEventListener('change', handleThemeChange)
     }
   }, [audioRef, notes, indicatorRef, accuraciesRef])
 
-  return <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} />
+  return <canvas ref={canvasRef} width={CANVAS_WIDTH_FALLBACK} height={CANVAS_HEIGHT} />
 }
 
 export default NoteHighway

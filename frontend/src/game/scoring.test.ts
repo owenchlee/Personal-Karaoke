@@ -43,12 +43,12 @@ describe('isPitchMatch', () => {
     expect(isPitchMatch(48, 60)).toBe(true)
   })
 
-  it('matches within the default 50 cent tolerance', () => {
-    expect(isPitchMatch(60.4, 60)).toBe(true)
+  it('matches within the default 100 cent tolerance', () => {
+    expect(isPitchMatch(60.9, 60)).toBe(true)
   })
 
   it('rejects a pitch outside tolerance', () => {
-    expect(isPitchMatch(61, 60)).toBe(false)
+    expect(isPitchMatch(62, 60)).toBe(false)
   })
 })
 

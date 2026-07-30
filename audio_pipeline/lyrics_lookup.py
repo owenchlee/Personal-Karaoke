@@ -36,6 +36,8 @@ _MAX_SECONDS_PER_CHAR = 0.5
 _LRC_TAG_RE = re.compile(r"^\[(\d{1,3}):(\d{2}(?:\.\d{1,3})?)\]")
 _CJK_RE = re.compile("[一-鿿]")
 
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
 # lrclib's plain-text lines routinely include the backing/ad-lib vocal alongside the lead line
 # (e.g. "that I fell for you (mm-hmm)"), or as an entire line of its own (e.g. "(I hope it's worth
 # it)") -- these are not what the player is meant to sing, so they're stripped out of the displayed
@@ -81,7 +83,7 @@ def fetch_synced_lyrics(
     if not isinstance(results, list) or not results:
         return None
 
-    synced = _pick_best_synced_lyrics(results, duration_seconds)
+    synced = _pick_best_synced_lyrics(results, duration_seconds, query)
     if not synced:
         return None
 
@@ -91,22 +93,52 @@ def fetch_synced_lyrics(
     return words, background_ranges
 
 
-def _pick_best_synced_lyrics(results: list[dict], duration_seconds: float | None) -> str | None:
+def _words(text: str) -> set[str]:
+    return set(_WORD_RE.findall(text.lower()))
+
+
+# lrclib's search endpoint does a loose full-text match across track/artist/album text, not a
+# "this is the song you meant" match -- querying it for just "Demons" surfaces at least half a
+# dozen genuinely different songs actually titled "Demons" (by Fiddler On Green, DJ Paul Elstak,
+# Fatboy Slim, Kurt Hugo Schneider, and others), any of which can coincidentally land closer in
+# duration to a given video than the real Imagine Dragons track -- confirmed directly as the cause
+# of a real user report of getting entirely wrong lyrics for that song. Duration-closeness alone
+# has no defense against this: two unrelated songs sharing a title easily share a duration too.
+# Require the candidate's own reported artist to actually appear in the query text (as it would
+# for a realistic video title like "Imagine Dragons - Demons (Official Video)") before trusting a
+# duration match -- this doesn't need an exact title match, since real queries carry extra noise
+# ("(Official Video)", "[Lyrics]", etc.) that a strict equality check would break on.
+def _artist_matches_query(candidate: dict, query_words: set[str]) -> bool:
+    artist_words = _words(candidate.get("artistName") or "")
+    if not artist_words or not query_words:
+        return True  # nothing to check the query against -- don't reject on missing metadata
+    return not artist_words.isdisjoint(query_words)
+
+
+def _pick_best_synced_lyrics(
+    results: list[dict], duration_seconds: float | None, query: str | None = None
+) -> str | None:
     """Pick the closest-duration candidate whose lyrics are actually in one
-    of the two scripts this app supports.
+    of the two scripts this app supports, and whose reported artist is
+    plausibly the one the query was actually about.
 
     lrclib matches by title text only, so a same/similar-titled song in a
-    completely different language (e.g. Thai) can be the closest-duration
-    result -- walk candidates in closest-duration order and skip any whose
-    lyrics are predominantly a wrong script, rather than trusting the single
-    closest match and returning known-wrong-language lyrics verbatim.
+    completely different language (e.g. Thai) or by a completely different
+    artist (e.g. a different band's own song called "Demons") can be the
+    closest-duration result -- walk candidates in closest-duration order and
+    skip any whose lyrics are predominantly a wrong script or whose artist
+    doesn't show up anywhere in the query, rather than trusting the single
+    closest match and returning known-wrong lyrics verbatim.
     """
     candidates = [r for r in results if r.get("syncedLyrics")]
     if duration_seconds is not None:
         candidates = sorted(
             candidates, key=lambda r: abs((r.get("duration") or 0) - duration_seconds)
         )
+    query_words = _words(query) if query else set()
     for candidate in candidates:
+        if not _artist_matches_query(candidate, query_words):
+            continue
         lyrics = candidate["syncedLyrics"]
         if is_mostly_supported_script(lyrics):
             return lyrics

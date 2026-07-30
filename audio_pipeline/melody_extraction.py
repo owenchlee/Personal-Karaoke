@@ -217,6 +217,19 @@ _PYIN_FMAX_HZ = _MAXIMUM_FREQUENCY_HZ
 # trusted -- a very short or quiet note can have too few voiced frames for a reliable median, and
 # in that case basic-pitch's original pitch (still the best available evidence) is left alone.
 _PYIN_MIN_VOICED_FRACTION = 0.3
+
+# Even below that main bar, a *unanimous, large* disagreement from the sparse voiced frames that
+# do exist is still strong evidence of a wrong note: real background noise or a breathy consonant
+# that pYIN happens to voice doesn't consistently land a full register away from what's actually
+# being sung. Needed because basic-pitch's own inference isn't perfectly deterministic run-to-run
+# -- reprocessing the identical `bruno-mars-count-on-me-lyrics` vocal stem twice with no code
+# change produced two different note segmentations (e.g. one run reported MIDI 81 at 93.6s, the
+# other 53 for the same moment), so a note's raw onset/offset -- and therefore how much of it ends
+# up voiced by pYIN -- can shift just enough to fall on either side of `_PYIN_MIN_VOICED_FRACTION`
+# by chance. This sparse-but-unanimous check catches the same class of error on the run where that
+# happens, instead of leaving it to luck.
+_PYIN_SPARSE_MIN_VOICED_FRACTION = 0.1
+_PYIN_SPARSE_MIN_DISAGREEMENT_SEMITONES = 7
 # How close (in pitch class, octave-agnostic) a pYIN frame must be to a note's corrected pitch to
 # count as "still singing this note" when extending its offset.
 _OFFSET_EXTEND_MATCH_SEMITONES = 1.5
@@ -228,6 +241,24 @@ _OFFSET_EXTEND_MAX_SECONDS = 0.5
 # is common and shouldn't be mistaken for the singer stopping). Matches the same order of
 # magnitude as the frontend's own `HOLD_SECONDS` tolerance for the same kind of brief interruption.
 _OFFSET_EXTEND_GAP_TOLERANCE_SECONDS = 0.15
+
+# Coverage-gap defense mirroring `lyrics_extraction._find_energetic_gaps`/`_repair_energetic_gaps`,
+# just for the note highway instead of the lyrics display. Measured directly on
+# `bruno-mars-count-on-me-lyrics`: several 0.3-0.6s stretches between two detected notes had real,
+# energetic (RMS 0.08-0.2, well above `_SILENCE_RMS_GATE`), clearly pYIN-voiced singing with no
+# basic-pitch onset there at all -- not something the trimming/dropping passes above are removing
+# (there was never a candidate note there to begin with), but a genuine missed detection. basic-pitch
+# doesn't always fire an onset for a real sung transition; this synthesizes a note directly from
+# pYIN's own pitch track for exactly that case.
+_GAP_REPAIR_MIN_GAP_SECONDS = 0.15
+_GAP_REPAIR_MIN_RUN_SECONDS = _MINIMUM_NOTE_LENGTH_MS / 1000
+# How close (pitch class) consecutive voiced pYIN frames must stay to count as the same
+# synthesized note, rather than two separate ones -- same tolerance already used for "still singing
+# this note" during offset extension above.
+_GAP_REPAIR_PITCH_TOLERANCE_SEMITONES = _OFFSET_EXTEND_MATCH_SEMITONES
+# A synthesized note has no basic-pitch confidence score behind it at all -- a neutral, middling
+# velocity rather than a fitted value.
+_GAP_REPAIR_VELOCITY = 0.5
 
 
 def _pyin_track(audio: np.ndarray, sample_rate: int) -> tuple[np.ndarray, np.ndarray]:
@@ -249,9 +280,100 @@ def _pyin_window(
     return window[~np.isnan(window)], len(window)
 
 
+def _should_correct_note_pitch(voiced_fraction: float, disagreement_semitones: float) -> bool:
+    """Whether pYIN's median pitch for a note's window is trustworthy enough to overwrite
+    basic-pitch's own reported pitch: either well-confirmed (enough of the note voiced), or sparse
+    but unanimous (see the `_PYIN_SPARSE_MIN_VOICED_FRACTION` comment for why this second path
+    exists)."""
+    if voiced_fraction >= _PYIN_MIN_VOICED_FRACTION:
+        return True
+    return (
+        voiced_fraction >= _PYIN_SPARSE_MIN_VOICED_FRACTION
+        and disagreement_semitones >= _PYIN_SPARSE_MIN_DISAGREEMENT_SEMITONES
+    )
+
+
 def _pitch_class_distance(a, b: float) -> np.ndarray:
     diff = np.abs(a - b) % 12
     return np.minimum(diff, 12 - diff)
+
+
+def _repair_melody_gaps(
+    notes: list[dict], times: np.ndarray, midi: np.ndarray, audio: np.ndarray, sample_rate: int
+) -> list[dict]:
+    """Synthesizes new notes directly from pYIN for gaps between existing notes (and before the
+    first / after the last) that have real, sustained, voiced singing with no basic-pitch note at
+    all -- see the `_GAP_REPAIR_*` constants above for why this exists. A gap is walked frame by
+    frame, grouping consecutive *voiced* pYIN frames of a stable pitch class into runs (any
+    unvoiced frame, or too big a pitch-class jump, ends the current run) -- only runs at least
+    `_GAP_REPAIR_MIN_RUN_SECONDS` long with real RMS energy behind them become a new note; anything
+    shorter (a stray voiced blip) or unvoiced (background noise, a breath) is left alone.
+
+    Must run after monophony/blip-collapse and pitch correction/offset extension, since it relies
+    on the *current* note boundaries to find gaps -- inserting into a stale note list would find
+    the wrong gaps.
+    """
+    if not notes:
+        return notes
+
+    audio_duration = len(audio) / sample_rate
+    boundaries = [(0.0, notes[0]["onset"])]
+    boundaries += [(a["offset"], b["onset"]) for a, b in zip(notes, notes[1:])]
+    boundaries.append((notes[-1]["offset"], audio_duration))
+
+    new_notes: list[dict] = []
+    for gap_start, gap_end in boundaries:
+        if gap_end - gap_start < _GAP_REPAIR_MIN_GAP_SECONDS:
+            continue
+
+        mask = (times >= gap_start) & (times < gap_end)
+        gap_times = times[mask]
+        gap_midi = midi[mask]
+
+        run_values: list[float] = []
+        run_start_time = None
+
+        def flush(run_end_time):
+            nonlocal run_values, run_start_time
+            if (
+                run_start_time is not None
+                and run_values
+                and run_end_time - run_start_time >= _GAP_REPAIR_MIN_RUN_SECONDS
+                and _note_rms(audio, sample_rate, run_start_time, run_end_time) >= _SILENCE_RMS_GATE
+            ):
+                pitch_midi = int(round(float(np.median(run_values))))
+                new_notes.append(
+                    {
+                        "pitch_midi": pitch_midi,
+                        "pitch_hz": round(_midi_to_hz(pitch_midi), 2),
+                        "onset": round(run_start_time, 4),
+                        "offset": round(run_end_time, 4),
+                        "duration": round(run_end_time - run_start_time, 4),
+                        "velocity": _GAP_REPAIR_VELOCITY,
+                    }
+                )
+            run_values = []
+            run_start_time = None
+
+        prev_time = gap_start
+        for t, value in zip(gap_times, gap_midi):
+            if np.isnan(value):
+                flush(prev_time)
+                prev_time = t
+                continue
+            if run_values and _pitch_class_distance(value, float(np.median(run_values))) > (
+                _GAP_REPAIR_PITCH_TOLERANCE_SEMITONES
+            ):
+                flush(prev_time)
+            if run_start_time is None:
+                run_start_time = t
+            run_values.append(float(value))
+            prev_time = t
+        flush(prev_time)
+
+    if not new_notes:
+        return notes
+    return sorted(notes + new_notes, key=lambda n: n["onset"])
 
 
 # `_collapse_octave_blips` only catches the *sandwiched* octave-artifact signature (near-zero gap
@@ -306,14 +428,16 @@ def _drop_unconfirmed_pitch_spikes(
 
 
 def _refine_with_pyin(notes: list[dict], audio: np.ndarray, sample_rate: int) -> list[dict]:
-    """Correct each note's pitch and extend its offset using an independent pYIN track, then drop
-    any note left with no independent pitch confirmation at all.
+    """Correct each note's pitch and extend its offset using an independent pYIN track, fill in any
+    real-singing gap basic-pitch missed entirely, then drop any note left with no independent pitch
+    confirmation at all.
 
     Notes must already be monophonic and onset-sorted (run after `_enforce_monophony` /
     `_collapse_octave_blips`). Pitch correction and offset extension are done as two separate
-    passes over the full list, in that order, so extension always checks against each note's
-    final (corrected) pitch rather than basic-pitch's original guess; dropping unconfirmed spikes
-    runs last so it also sees each note's final (possibly-extended) duration.
+    passes over the full list, in that order, so extension always checks against each note's final
+    (corrected) pitch rather than basic-pitch's original guess; gap-filling runs after both (so it
+    sees each note's final, possibly-extended boundaries when finding gaps); dropping unconfirmed
+    spikes runs last so it also sees the final note list, including any newly-synthesized notes.
     """
     if not notes:
         return notes
@@ -324,8 +448,12 @@ def _refine_with_pyin(notes: list[dict], audio: np.ndarray, sample_rate: int) ->
 
     for note in refined:
         voiced, total = _pyin_window(times, midi, note["onset"], note["offset"])
-        if total > 0 and len(voiced) / total >= _PYIN_MIN_VOICED_FRACTION:
-            corrected_midi = int(round(float(np.median(voiced))))
+        if total == 0 or len(voiced) == 0:
+            continue
+        voiced_fraction = len(voiced) / total
+        corrected_midi = int(round(float(np.median(voiced))))
+        disagreement = float(_pitch_class_distance(corrected_midi, note["pitch_midi"]))
+        if _should_correct_note_pitch(voiced_fraction, disagreement):
             note["pitch_midi"] = corrected_midi
             note["pitch_hz"] = round(_midi_to_hz(corrected_midi), 2)
 
@@ -366,6 +494,8 @@ def _refine_with_pyin(notes: list[dict], audio: np.ndarray, sample_rate: int) ->
 
         note["offset"] = round(extended_offset, 4)
         note["duration"] = round(note["offset"] - note["onset"], 4)
+
+    refined = _repair_melody_gaps(refined, times, midi, audio, sample_rate)
 
     return _drop_unconfirmed_pitch_spikes(refined, times, midi)
 

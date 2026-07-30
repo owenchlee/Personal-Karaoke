@@ -63,7 +63,12 @@ def test_list_songs_skips_unpublished_and_reads_title_from_meta(tmp_path, monkey
 
     assert response.status_code == 200
     assert response.json()["songs"] == [
-        {"slug": "my-song", "title": "My Song", "processed_at": "2026-07-28T00:00:00+00:00"}
+        {
+            "slug": "my-song",
+            "title": "My Song",
+            "processed_at": "2026-07-28T00:00:00+00:00",
+            "starred": False,
+        }
     ]
 
 
@@ -82,7 +87,7 @@ def test_list_songs_falls_back_to_slug_when_meta_is_missing(tmp_path, monkeypatc
     response = client.get("/api/songs")
 
     assert response.json()["songs"] == [
-        {"slug": "old-cli-song", "title": "old-cli-song", "processed_at": None}
+        {"slug": "old-cli-song", "title": "old-cli-song", "processed_at": None, "starred": False}
     ]
 
 
@@ -131,6 +136,56 @@ def test_delete_song_404s_for_unknown_slug(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "PUBLIC_DIR", tmp_path / "public")
 
     response = client.delete("/api/songs/does-not-exist")
+
+    assert response.status_code == 404
+
+
+def test_set_song_starred_persists_in_meta_json(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    public_dir = tmp_path / "public"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    monkeypatch.setattr(server, "PUBLIC_DIR", public_dir)
+
+    published_dir = public_dir / "my-song"
+    published_dir.mkdir(parents=True)
+    (published_dir / "notes.json").write_text("[]")
+    meta_dir = cache_dir / "my-song"
+    meta_dir.mkdir(parents=True)
+    (meta_dir / "meta.json").write_text(json.dumps({"title": "My Song"}))
+
+    response = client.put("/api/songs/my-song/starred", json={"starred": True})
+
+    assert response.status_code == 200
+    assert response.json() == {"slug": "my-song", "starred": True}
+    meta = json.loads((meta_dir / "meta.json").read_text())
+    assert meta == {"title": "My Song", "starred": True}
+    assert client.get("/api/songs").json()["songs"][0]["starred"] is True
+
+
+def test_set_song_starred_creates_meta_json_when_missing(tmp_path, monkeypatch):
+    """A song published via the old CLI path has no meta.json yet -- starring
+    it should create one rather than 404ing or crashing."""
+    cache_dir = tmp_path / "cache"
+    public_dir = tmp_path / "public"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    monkeypatch.setattr(server, "PUBLIC_DIR", public_dir)
+
+    published_dir = public_dir / "old-cli-song"
+    published_dir.mkdir(parents=True)
+    (published_dir / "notes.json").write_text("[]")
+
+    response = client.put("/api/songs/old-cli-song/starred", json={"starred": True})
+
+    assert response.status_code == 200
+    meta = json.loads((cache_dir / "old-cli-song" / "meta.json").read_text())
+    assert meta == {"starred": True}
+
+
+def test_set_song_starred_404s_for_unknown_slug(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(server, "PUBLIC_DIR", tmp_path / "public")
+
+    response = client.put("/api/songs/does-not-exist/starred", json={"starred": True})
 
     assert response.status_code == 404
 
@@ -234,6 +289,146 @@ def test_run_job_serializes_concurrent_requests_for_the_same_song(tmp_path, monk
     assert job1.status == "done"
     assert job2.status == "done"
     assert job1.slug == job2.slug == "my-song"
+
+
+def test_submit_score_creates_a_new_record_on_first_play(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "SCORES_DIR", tmp_path / "scores")
+    monkeypatch.setattr(server, "_SLUG_LOCKS", {})
+
+    response = client.post("/api/scores", json={"song_id": "My Song", "score": 72})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["slug"] == "my-song"
+    assert body["best_score"] == 72
+    assert body["play_count"] == 1
+    assert body["is_new_best"] is True
+    assert body["previous_best"] is None
+
+
+def test_submit_score_updates_best_when_beaten(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "SCORES_DIR", tmp_path / "scores")
+    monkeypatch.setattr(server, "_SLUG_LOCKS", {})
+
+    client.post("/api/scores", json={"song_id": "my-song", "score": 60})
+    response = client.post("/api/scores", json={"song_id": "my-song", "score": 85})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["best_score"] == 85
+    assert body["previous_best"] == 60
+    assert body["play_count"] == 2
+    assert body["is_new_best"] is True
+
+
+def test_submit_score_keeps_previous_best_when_not_beaten(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "SCORES_DIR", tmp_path / "scores")
+    monkeypatch.setattr(server, "_SLUG_LOCKS", {})
+
+    client.post("/api/scores", json={"song_id": "my-song", "score": 85})
+    response = client.post("/api/scores", json={"song_id": "my-song", "score": 60})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["best_score"] == 85
+    assert body["previous_best"] == 85
+    assert body["play_count"] == 2
+    assert body["is_new_best"] is False
+
+
+def test_list_scores_resolves_title_from_meta_json(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    scores_dir = tmp_path / "scores"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    monkeypatch.setattr(server, "SCORES_DIR", scores_dir)
+
+    meta_dir = cache_dir / "my-song"
+    meta_dir.mkdir(parents=True)
+    (meta_dir / "meta.json").write_text(json.dumps({"title": "My Song"}))
+
+    scores_dir.mkdir(parents=True)
+    (scores_dir / "my-song.json").write_text(
+        json.dumps(
+            {
+                "slug": "my-song",
+                "best_score": 91,
+                "best_achieved_at": "2026-07-28T00:00:00+00:00",
+                "play_count": 3,
+                "last_played_at": "2026-07-28T00:00:00+00:00",
+            }
+        )
+    )
+
+    response = client.get("/api/scores")
+
+    assert response.status_code == 200
+    assert response.json()["scores"] == [
+        {
+            "slug": "my-song",
+            "title": "My Song",
+            "best_score": 91,
+            "best_achieved_at": "2026-07-28T00:00:00+00:00",
+            "play_count": 3,
+            "last_played_at": "2026-07-28T00:00:00+00:00",
+        }
+    ]
+
+
+def test_list_scores_falls_back_to_slug_when_meta_is_missing(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    scores_dir = tmp_path / "scores"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    monkeypatch.setattr(server, "SCORES_DIR", scores_dir)
+
+    scores_dir.mkdir(parents=True)
+    (scores_dir / "old-cli-song.json").write_text(
+        json.dumps(
+            {
+                "slug": "old-cli-song",
+                "best_score": 50,
+                "best_achieved_at": "2026-07-28T00:00:00+00:00",
+                "play_count": 1,
+                "last_played_at": "2026-07-28T00:00:00+00:00",
+            }
+        )
+    )
+
+    response = client.get("/api/scores")
+
+    assert response.json()["scores"][0]["title"] == "old-cli-song"
+
+
+def test_score_path_rejects_a_slug_that_resolves_above_base(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "SCORES_DIR", tmp_path / "scores")
+
+    with pytest.raises(HTTPException) as exc_info:
+        server._score_path("../escape")
+
+    assert exc_info.value.status_code == 400
+
+
+def test_delete_recording_removes_the_file(tmp_path, monkeypatch):
+    recordings_dir = tmp_path / "recordings"
+    recordings_dir.mkdir()
+    monkeypatch.setattr(server, "RECORDINGS_DIR", recordings_dir)
+
+    recording_path = recordings_dir / "my-song__1700000000.mp3"
+    recording_path.write_bytes(b"fake mp3 data")
+
+    response = client.delete(f"/api/recordings/{recording_path.name}")
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": recording_path.name}
+    assert not recording_path.exists()
+    assert client.get("/api/recordings").json()["recordings"] == []
+
+
+def test_delete_recording_404s_for_unknown_filename(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "RECORDINGS_DIR", tmp_path / "recordings")
+
+    response = client.delete("/api/recordings/does-not-exist__1700000000.mp3")
+
+    assert response.status_code == 404
 
 
 def test_overall_progress_maps_stage_fraction_into_its_weighted_span():

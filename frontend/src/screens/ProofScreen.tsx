@@ -121,7 +121,7 @@ function ProofScreen() {
                 style={{ width: `${Math.min(micLevel * 400, 100)}%` }}
               />
             </div>
-            <button type="button" className="btn btn-secondary" onClick={stopMicTest} style={{ marginTop: '0.75rem' }}>
+            <button type="button" className="btn btn-secondary proof-mic-stop" onClick={stopMicTest}>
               Stop
             </button>
           </>

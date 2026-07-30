@@ -796,3 +796,373 @@ which stays driven straight off `audioRef.current.currentTime`). `game/scoring.t
 All 91 frontend vitest tests pass unaffected (none assert these specific constant values), `tsc
 --noEmit` clean. Not yet re-verified by ear/by singing against the real test song -- same pending
 human check as above.
+
+## "Lyrics frozen but notes still on the highway" -- lrclib gap-repair + a language-detection bug (recorded 2026-07-29)
+
+Reported: a stretch where the lyrics display isn't advancing (same word held) while the note
+highway still shows notes scrolling through. Root-caused with `systematic-debugging`, not guessed:
+notes (`basic-pitch`+`pyin`) and lyrics (lrclib lookup, or local `faster-whisper`) come from two
+independent pipelines with no shared timeline, so nothing guarantees they agree about when singing
+is happening at a given moment.
+
+**Measured directly against every real cached song** (a script comparing each inter-word lyrics gap
+against `notes.json`'s coverage of that same span): the local-transcription path already has a
+defense for this (`_repair_energetic_gaps`, added earlier), but the online lrclib-lookup path had
+none at all. Confirmed on `priscilla-chan-night-flight-english-yale-romanization`: a **25.76s**
+stretch (166-192s) with vocal-stem RMS (0.01-0.05) comparable to the song's own median non-silent
+RMS (~0.07) had zero lrclib coverage -- real singing energy the whole way through, with no
+corresponding lyric text at all.
+
+**Fix**: `_find_energetic_gaps()` (cheap, model-free RMS scan reusing the existing repair
+condition) + `_repair_synced_lyrics_gaps()` in `lyrics_extraction.py`, wired into `extract_lyrics()`
+right after lrclib alignment. Whisper is only loaded if the scan finds an actual gap worth
+repairing, so a song whose lrclib lyrics already cover the whole song (the common case -- verified
+on `huang-jin-shi-dai`/`james-arthur`/`jamie-miller`/`song`, none of which had any flagged gaps)
+stays on the fast lookup-only path with zero added cost. 6 new unit tests.
+
+**A second, pre-existing bug this fix's own verification surfaced**: re-running the new repair pass
+against `priscilla-chan`'s real cached data initially recovered almost nothing (318 -> 319 words),
+even in gaps with strong, unambiguous vocal energy. Instrumented the repair pass directly: it called
+`_detect_language`, which returned `"en"` for this Cantonese song. Checked the model's own full
+probability list: `zh` (generic Mandarin/Chinese) scored 0.64, `en` only 0.06, and `yue` wasn't in
+the returned list at all (~0) -- exactly the "Cantonese gets mislabeled as zh" failure mode the
+module's own comment already named, but the code never actually acted on: `_detect_language` only
+ever compared raw `en` vs `yue` scores, so a near-zero `yue` let a barely-nonzero `en` "win" even
+with `zh` dominant. This bug predates this session's change but was never exercised for this song
+before, since it previously always succeeded via the fast lrclib path and never needed to call
+Whisper at all. Fixed by folding `zh`'s probability into `yue`'s candidate score before comparing.
+Confirmed directly: forcing `language="yue"` on the same gaps recovered real Cantonese text (e.g.
+回頭再喝美味燈光) where `language="en"` had recovered nothing or hallucinated English words
+("mobile", "building"). 1 new unit test.
+
+**Re-verified on the real song after both fixes**: 318 -> 320 words (net +2, not the large recovery
+hoped for). Investigated why, rather than assuming both fixes together were sufficient: even with
+the correct language, Whisper's re-transcription of these specific isolated gap windows mostly
+produced words *outside* the actual gap boundaries (in the padding, already covered by a
+neighboring anchor) rather than inside them -- the same "genuine ASR miss on this specific audio"
+limitation already documented earlier in this file for the local-transcription path (see "Wrong
+first word" and the `_repair_energetic_gaps` module comment), not a bug in the new repair logic
+itself. The mechanism is verified working end-to-end (detects real gaps, skips Whisper entirely
+when not needed, uses the correct language, recovers what Whisper is actually capable of
+recovering) -- but, consistent with every other ASR-accuracy finding in this file, it's not a
+guarantee that every gap gets fully text-recovered. 132 Python tests pass total (`tsc --noEmit`
+untouched -- this was backend-only).
+
+Not yet re-run against the actual cached `lyrics.json` files for any song (this was verified by
+calling the repair functions directly against cached data, not by reprocessing) -- a song affected
+by this needs `extract_lyrics`/`process_song` re-run (with `force=True`) and republishing to pick
+up the fix in the running app.
+
+## Timing-architecture audit: pitch-detection buffer latency + mic delay calibration (recorded 2026-07-29)
+
+Requested audit of the whole timing architecture against five principles (single clock source,
+lookahead scheduling for any scheduled audio, pitch-detection latency compensation, input/output
+latency calibration, rendering decoupling). Checked each against the actual code rather than
+assuming.
+
+**Already correct**: `NoteHighway.tsx`, `LyricsDisplay.tsx`, `useLivePitchIndicator.ts`, and
+`useScoring.ts` all read position from `audioRef.current.currentTime` inside a `requestAnimationFrame`
+loop every frame -- confirmed no `setInterval`/`Date.now`/independent timestamp anywhere derives song
+position (this was already a deliberate design decision recorded earlier in this file, for Phase 2).
+Playback itself goes through a plain `<audio>` element, not a Web Audio graph, so there's no separate
+scheduled-audio-node case in the normal game flow either -- the only place that pattern applies is
+the new calibration click track below.
+
+**Gap found -- pitch-detection latency uncompensated**: `useMicPitch.ts` timestamped each pitch
+sample with `audioRef.current.currentTime` at the moment `getFloatTimeDomainData` was read and
+processed, not the start of the 2048-sample buffer that produced it. `getFloatTimeDomainData`
+returns the most recent `fftSize` samples as of *now* -- the pitch it implies was actually sung
+starting one whole buffer-length earlier. At a typical 44.1-48kHz mic input, `2048 / sampleRate`
+is **~42.7-46.4ms** of latency that was silently baked in as "this sample is more recent than it
+really is," biasing hit detection right at note boundaries. Fixed by subtracting
+`analyser.fftSize / context.sampleRate` from the timestamp before it's stored.
+
+**Gap found -- no input/output latency calibration existed at all**. Added the one-time "play a
+click, clap along" calibration UltraStar and similar games use:
+- `game/calibration.ts` (pure, unit tested): `pairBeatsToTaps` greedily matches each scheduled beat
+  to the nearest clap within a match window (drops beats with no nearby clap and claps unrelated to
+  any beat, never double-matches one clap); `computeCalibrationResult` takes the median of the
+  matched (tap - beat) offsets (resistant to one mistimed clap the same way `smoothMidi` resists a
+  pitch outlier), returning `null` if fewer than 4 beats matched rather than trusting too little
+  data; `load`/`save`/`clearCalibrationOffsetSeconds` persist the result to `localStorage` so it's a
+  true one-time step, not per-session.
+- `hooks/useCalibration.ts`: schedules an 8-beat, 100bpm click track and listens for clap onsets
+  (an RMS spike over a refractory-gated threshold), both against **one shared `AudioContext`'s
+  `currentTime`** -- no `<audio>` element is involved in calibration at all, so this is the one place
+  in the app where that clock, not the media element's, is the correct single source of truth. The
+  click track is scheduled via the standard Web Audio "lookahead scheduler" pattern (a 25ms
+  `setInterval` that only ever schedules a beat once it's within a 100ms lookahead window of
+  `context.currentTime`, rather than playing anything directly from a timer/UI callback) -- the only
+  place in the app that actually schedules audio playback events ahead of time, so the only place
+  that pattern was needed.
+- `screens/CalibrationScreen.tsx`, reachable via `?screen=calibrate` (added to the sidebar as "Mic
+  calibration"), following the same screen-routing pattern as the existing proof/load/songs screens.
+- The measured offset is applied in exactly one place -- `useMicPitch.ts` subtracts it (alongside the
+  buffer-latency correction above) from every `PitchSample.time` at the moment a mic session starts
+  -- so `useScoring` and `useLivePitchIndicator` get the correction for free with no changes of their
+  own, consistent with this file's established pattern of keeping one shared source of truth rather
+  than letting each consumer recompute its own copy.
+
+**Verification**: 11 new vitest tests for `calibration.ts`'s pure pairing/median/storage logic (102
+frontend tests pass total, up from 91), `tsc -b --noEmit` clean. Not yet verified by an actual human
+running the calibration screen and singing afterward -- same category of real-time audio/mic
+behavior this file has repeatedly flagged as unverifiable through this session's browser-automation
+tooling (hidden-tab `rAF`/media suspension); a human should run `?screen=calibrate`, clap along, and
+confirm the saved correction reduces perceived mic lag during a real song before considering this
+fully closed.
+
+## Bruno Mars ("Count on Me") only scoring ~41-47%, and a real basic-pitch octave bug (recorded 2026-07-29)
+
+Reported: scoring only 41-47% on `bruno-mars-count-on-me-lyrics`, including a control test -- playing
+the actual song's own audio back into the mic -- that itself only scored 41%. Separately asked
+whether the live pill/reference "sometimes automatically goes to the high notes."
+
+**Isolated the real-world score gap with two offline diagnostics** (no browser-automation audio/mic
+limitation involved, since neither needs real hardware):
+- Cross-checked this song's `notes.json` against an independent `librosa.pyin` trace over its own
+  vocal stem: 96.6% pitch-class agreement, 0 clean octave errors, ~5% coverage gap -- in line with
+  every other cached song already validated this way. The reference data was *not* the problem.
+- Reproduced the exact production mic pipeline (same `pitchy` detector, same FFT/clarity/RMS
+  constants as `useMicPitch.ts`, same `isPitchMatch`/`songAccuracyScore` as `scoring.ts`) in a
+  standalone Node script fed the literal vocal-stem audio directly -- no speakers, mic, or room in
+  the loop at all. Result: **95%**. This rules out the scoring thresholds and detection algorithm as
+  the cause of a ~41-47% real-world score; the gap has to be the acoustic speaker-to-mic path itself
+  (most likely echo-cancellation "double-talk" attenuating the near-end signal while the loud
+  far-end reference plays simultaneously -- worst-case for exactly this test's methodology, but
+  present during normal play too, since the instrumental always plays through speakers while the mic
+  listens). Recommended the user try headphones next as a cheap, conclusive test of that hypothesis.
+
+**The "bar jumps to high notes" question turned out to be true, for a different and more interesting
+reason than expected.** Cross-checking flagged 14/412 notes (3.4%) disagreeing with pYIN by a large
+margin -- e.g. reported MIDI 81 at 93.6s where pYIN's own median was 53, a ~2.3-octave difference.
+Investigated *why* `_refine_with_pyin`'s existing pYIN-correction pass didn't already catch these
+(it's specifically designed to fix exactly this kind of basic-pitch octave error): re-ran
+`extract_melody` on the identical, unchanged `vocals.wav` a second time with no code change at all,
+and got a **different** result (that same moment corrected to 53 on the second run). basic-pitch's
+underlying model inference is not perfectly reproducible run-to-run -- the raw note segmentation
+shifts slightly each time, which shifts how much of a note's window ends up voiced by pYIN, which can
+tip a note's voiced fraction across `_PYIN_MIN_VOICED_FRACTION` (0.3) in one run but not another.
+
+**Fix**: added a second, narrower correction path in `melody_extraction.py`'s `_refine_with_pyin` --
+even below the main 0.3 voiced-fraction bar, if the sparse voiced frames that do exist *unanimously*
+disagree by a large margin (`_PYIN_SPARSE_MIN_VOICED_FRACTION = 0.1`,
+`_PYIN_SPARSE_MIN_DISAGREEMENT_SEMITONES = 7`), that's still trustworthy evidence of a wrong note --
+real background noise or a stray breathy frame doesn't consistently agree on a specific, far-away
+pitch class. Extracted the decision itself into a small pure `_should_correct_note_pitch()` helper
+(directly unit tested, 4 new tests) rather than testing it via fragile hand-tuned audio synthesis.
+136 Python tests pass.
+
+**Re-verified directly on the real song**: re-ran `extract_melody` on the cached
+`bruno-mars-count-on-me-lyrics` vocal stem with the fix and republished. pYIN disagreement dropped
+14/412 -> **0/412**; short-note fragmentation also improved (48.3% -> 39.1% under 250ms) and coverage
+ticked up slightly (66.7% -> 71.4% song duration covered) -- likely because some of the fixed notes
+merged/extended better once their pitch was correct. This is a real, verified improvement for this
+song, but the underlying nondeterminism isn't eliminated -- a different song, or reprocessing this
+one again, could still produce an occasional case the sparse-correction path doesn't catch. If a
+similar "bar looks obviously wrong for a moment" report comes in again, reprocessing the affected
+song with `force=True` and re-checking against pYIN (per this note's methodology) is the fastest way
+to confirm.
+
+**Difficulty reduced another notch** per request, extending the existing "reduce difficulty" pattern:
+`coords.ts`'s `DEFAULT_PX_PER_SECOND` 160 -> 130 (slower highway scroll, more reaction time),
+`scoring.ts`'s `CENTS_TOLERANCE` 80 -> 100 (a full semitone of pitch margin either way) and
+`NOTE_HIT_FRACTION_THRESHOLD` 0.4 -> 0.35. 102 frontend tests pass (one updated to match the new
+100-cent tolerance boundary), `tsc -b --noEmit` clean.
+
+## Two more reports on the same song: missing notes and lost quiet endings (recorded 2026-07-29)
+
+Headphones confirmed to help a lot with real-world scoring (per the earlier echo-cancellation
+hypothesis). Two further reports: (1) sometimes the original artist is clearly singing a note that
+never shows up on the highway at all, and (2) singing a long note that trails off quietly (a
+decrescendo) stops registering with the mic well before the note actually ends.
+
+**Missing notes -- confirmed and fixed.** Checked whether `bruno-mars-count-on-me-lyrics` had any
+lrclib-sourced `background_vocal_ranges` stripping real melody notes (a mechanism that exists for
+lyrics, see the "Lyrics frozen" entry above) -- it didn't (`fetch_synced_lyrics` returned none for
+this song), so that wasn't the cause here. Instead, examining the exact timestamps of "energetic,
+clearly-voiced, but uncovered" moments (same coverage-gap metric used throughout this file) showed
+several 0.3-0.6s stretches of real, sustained singing sitting *between* two detected notes with no
+basic-pitch onset there at all -- not something any of the trimming/dropping passes were removing
+(there was never a candidate note there to drop), but a genuine missed detection: basic-pitch simply
+doesn't always fire an onset for a real sung transition.
+
+**Fix**: added `_repair_melody_gaps()` to `melody_extraction.py`, run inside `_refine_with_pyin`
+right after offset extension. Mirrors the existing lyrics-side gap defense
+(`_find_energetic_gaps`/`_repair_energetic_gaps`) but for the note highway: walks each gap between
+(and before/after) existing notes frame-by-frame over the same pYIN track already computed for
+correction/extension, grouping contiguous voiced frames of a stable pitch class into runs, and
+synthesizes a new note directly from pYIN's own median pitch for any run at least
+`_GAP_REPAIR_MIN_RUN_SECONDS` (150ms) long with real RMS energy behind it. 4 new unit tests (fills a
+real gap, leaves a real silent gap alone, ignores a too-short blip, fills a gap before the first
+note) -- one existing test's fixture had to be corrected in the process (its note onset didn't
+actually match where its own synthetic audio started, which the new gap-repair correctly noticed and
+flagged by filling the artificial "gap" that mismatch created). 144 Python tests pass.
+
+**Re-verified on the real song**: re-ran extraction on the cached `bruno-mars-count-on-me-lyrics`
+vocal stem and republished. Notes 412 -> 430 (18 real gaps filled), the "energetic+voiced but
+uncovered" coverage gap dropped 4.4% -> 2.4%, total song coverage 71.4% -> 73.1%, pYIN pitch
+disagreement stayed at 0%.
+
+**Quiet decrescendo notes dropping out of mic detection -- also confirmed, and a real bug in the
+constant's provenance.** `useMicPitch.ts`'s `MIN_RMS = 0.01` gate rejects an entire pitch sample
+below that loudness, regardless of `clarity` -- but that threshold was borrowed by analogy from
+`_SILENCE_RMS_GATE` in `melody_extraction.py`, a constant validated for a completely different
+signal (a Demucs-separated vocal stem), never actually measured against live mic input. A real
+sung note trailing off quietly is exactly the case this silently kills, even though pitchy's
+`clarity` score (how strongly periodic the signal is) should already be a reliable, amplitude-
+independent signal of "is this really a sung pitch" on its own.
+
+**Fix**: lowered `MIN_RMS` 0.01 -> 0.003 -- still rejects true silence/noise floor, but no longer
+cuts off a genuine quiet tail purely on loudness. Not independently measurable through this
+session's tooling (same live-mic limitation as everything else in this file); a human should confirm
+a held note's quiet ending now keeps registering. `tsc -b --noEmit` clean, 114 frontend tests pass
+(unaffected -- this constant has no dedicated unit test, consistent with the rest of this
+browser-only hook).
+
+## Highway notes with no corresponding lyrics -- e.g. Priscilla Chan's hummed intro (recorded 2026-07-29)
+
+Reported: the note highway shows notes during the Priscilla Chan song's hummed intro, before any
+lyrics are shown, so the player has nothing to sing along to. Same class of problem as
+`_remove_background_vocal_notes` already solves for ad-lib/backing vocals, but a different
+manifestation: `notes.json` (basic-pitch + pYIN, from the vocal stem's raw energy/pitch) and
+`lyrics.json` (lrclib or local Whisper transcription) are independent pipelines with no shared
+timeline, so nothing stopped a note from appearing where there's no displayed lyric at all.
+
+**Measured directly** against the real cached
+`priscilla-chan-night-flight-english-yale-romanization`: 21 notes sit entirely before the first
+lyric line (45.98s) and a symmetric cluster sits entirely after the last line (245-253s) -- neither
+region is ever touched by either gap-repair pass (`_repair_energetic_gaps` /
+`_repair_synced_lyrics_gaps`), since both only fill gaps *between* existing words, never before the
+first or after the last. Also measured that a strict, zero-tolerance cutoff at each line's own
+start/end would be wrong: a note at 48.26-48.42s shares the same MIDI pitch (66) as the note ending
+exactly at that line's reported end (48.18s) -- a real continuation of the sung word's tail, not
+humming, and this pattern repeats at nearly every line boundary in the song.
+
+**Fix**: `_remove_notes_without_lyrics()` in `pipeline.py`, wired into `process_song` unconditionally
+(right alongside the existing `_remove_background_vocal_notes` call). Groups lyric words by their
+`line` field (confirmed a contiguous, always-present grouping key on both lyric sources), computes
+each line's `(min start, max end)` span, and drops any note that doesn't overlap the union of those
+spans padded by `_LYRIC_COVERAGE_PADDING_SECONDS = 0.5` -- the same order of magnitude as the
+existing `_OFFSET_EXTEND_MAX_SECONDS`/gap-repair-margin precedent already used elsewhere for the
+identical "is this still the same utterance" judgment, which keeps the real boundary continuations
+above while still dropping the genuine tens-of-seconds-away intro/outro humming. Empty lyrics (a
+real possible case -- an lrclib result where every line is background vocal) drops all notes rather
+than crashing. 2 new unit tests in `tests/test_pipeline.py`.
+
+**Verified directly against the real song**: applying the fix to a copy of
+`priscilla-chan-night-flight-english-yale-romanization/notes.json` dropped exactly the 21 pre-intro
+notes and the post-outro cluster (max note onset 253.1s -> 245.6s) while keeping the 48.26s
+boundary-continuation note. Also flagged, not fixed here: a ~4s interior gap (216.3-220.24s) with
+continuous moderate-to-high-velocity notes and zero lyric coverage -- long and energetic enough that
+`_repair_synced_lyrics_gaps` (added in an earlier session, same day) should recover it as real text
+once this song is reprocessed with that fix; it isn't a "no lyrics possible" case like the intro/
+outro, so it's called out here rather than silently left unexplained.
+
+**Retroactively applied to every already-cached song** (12 total), since none of their original
+source videos still exist (temp downloads, already deleted) to allow a full reprocess -- ran the new
+function directly against each cached `notes.json`/`lyrics.json` pair in place (cheap: no
+re-download, no re-running Demucs/Whisper). Note counts dropped moderately for most songs (e.g.
+`flac-lyrics` 517 -> 467, `priscilla-chan...` 498 -> 438) and were unchanged for a few that already
+had full lyric coverage (`james-arthur-car-s-outside-lyrics`, `jamie-miller-...`, `wait`) --
+consistent with the fix only removing genuinely uncovered notes. 8/8 `tests/test_pipeline.py` tests
+pass.
+
+## Lyrics timing: replaced with CTC forced alignment (recorded 2026-07-30)
+
+Reported: notes on the highway that don't seem to match the lyrics, and lyrics that seem a bit off
+from playback. Researched the accuracy of `vocals.wav` extraction end-to-end (Demucs separation
+quality, plus everything downstream of it) and proposed two independent improvements; this entry
+covers the first one, implemented per request.
+
+**Root cause (reasoned from the existing code, not re-measured from scratch -- the measurements
+behind it are already in this file)**: the online lrclib path only ever had *approximate* word
+timing. lrclib gives line-level timestamps; word timing within a line was a linear character-
+weighted guess (`lyrics_lookup._distribute_words`), and even the line timestamps themselves belong
+to whatever release lrclib matched by title -- not necessarily this specific video. The previous
+fix (`_align_synced_lyrics_to_audio`, see "Lyrics drifting out of sync" above) tried to *correct*
+lrclib's reported timestamps by fitting an intro-offset + proportional-drift model against the
+vocal stem's own onset/last-activity energy. That's a reasonable model for a linear mismatch, but
+it can only ever approximate a different release's timing, not measure this one -- and
+`pipeline._remove_notes_without_lyrics` depends directly on lyric-line spans being accurate, so
+timing drift there reads as "notes with no matching lyric," which is exactly the reported symptom.
+
+**Fix**: replaced the whole correction step with CTC forced alignment
+(`audio_pipeline/forced_alignment.py`, new module) -- instead of correcting lrclib's *guessed*
+timestamps, force-align lrclib's *known-correct text* directly against this video's own vocal stem,
+measuring real per-word timing instead of approximating it. Uses Meta's MMS wav2vec2 CTC model
+(`MahmoudAshraf/mms-300m-1130-forced-aligner`, multilingual, covers both English and Cantonese) via
+`transformers`, romanized through `uroman` (the model's vocabulary is a small universal phonetic
+alphabet, not native scripts), with the Viterbi alignment computed by
+`torchaudio.functional.forced_align`.
+
+**Deliberately not using the `ctc-forced-aligner` PyPI package**, even though it implements this
+exact idea end-to-end and was the first thing tried: its `align_ops` extension is C++ and has no
+prebuilt wheel for Windows, and `pip install` failed outright on this machine (`Microsoft Visual
+C++ 14.0 or greater is required`), which isn't installed here. Confirmed `torchaudio`'s own
+`forced_align` (already shipped, prebuilt, part of the `torch`/`torchaudio` install this project
+already requires) implements the identical algorithm/signature, so `forced_alignment.py`
+reimplements the relevant slice of that package's (small, MIT/BSD) Python-side logic directly
+against `torchaudio.functional.forced_align` instead of depending on the package. Cross-checked
+output against the original package's own Python API pattern on real cached vocal stems before
+committing to this -- not just assumed equivalent.
+
+`lyrics_extraction.py`: `_align_synced_lyrics_to_audio`/`_fit_time_correction`/
+`_find_first_vocal_onset`/`_find_last_vocal_activity` (and their constants) removed outright rather
+than kept alongside the new approach -- forced alignment supersedes what they did, not
+supplements it. New `_force_align_synced_lyrics` calls `forced_alignment.align_tokens` with the
+lrclib-fetched word list's own tokens (language auto-detected from script -- any CJK character
+means Cantonese, since a song's lyrics are never a mix of the two supported languages) and replaces
+their start/end with the aligned result. `_repair_synced_lyrics_gaps` (the existing Whisper-based
+gap-filler for real singing lrclib's text doesn't cover at all, e.g. a skipped ad-lib) is
+unchanged and still runs after alignment -- unrelated concern, still needed.
+
+**Background-vocal ranges** (`lyrics_lookup`'s parenthesized ad-lib stripping) have no text of
+their own to force-align against, so they can't be re-timed the same way. New
+`_interpolate_background_range` instead re-times each one from its *forced-aligned neighboring
+words'* positions (the last real word before it, the first real word after it, in original
+lrclib-time order) rather than trusting its own raw lrclib timestamp -- more consistent with the
+audio's real timing than a two-point global fit would have given it anyway, and needs no separate
+onset-detection logic of its own.
+
+**Verification**: 3 new tests in `tests/test_forced_alignment.py` (real, unmocked smoke tests
+against a synthetic clip -- same accuracy caveat as every other model-backed smoke test in this
+file: proves the mechanics run and produce one increasing timespan per input token, not that
+alignment is accurate against real singing). `tests/test_lyrics_extraction.py`'s old affine-
+correction tests replaced with tests for `_language_of_words`/`_interpolate_background_range`/
+`_force_align_synced_lyrics` (the latter mocking `align_tokens`, same pattern already used for
+`WhisperModel` in this file -- a real 300M-param model has no place in a fast unit test). 162
+Python tests pass total.
+
+**Manually verified against real cached vocal stems** (not just synthetic clips), both languages:
+- English (`test-song`, 274s): force-aligning "Loving can hurt, loving can hurt sometimes..."
+  against the real vocal stem placed "Loving" at 17.96-18.48s -- close to this file's own earlier-
+  recorded real vocal onset (~18.13s) and to the existing Whisper transcription's 17.58s. "hurt"
+  (first occurrence) came back spanning 18.70-20.88s, a ~2.2s hold -- notably longer than Whisper's
+  own 18.52-19.02s for the same word. Plausible rather than confirmed wrong: this is a repeated
+  "loving can hurt, loving can hurt" phrase, exactly the shape of a held note before a repeat, and
+  Whisper's own segment-cutting has documented under-duration issues elsewhere in this file: not
+  independently confirmed by ear (same audio-playback limitation as everywhere else in this file),
+  but internally consistent with the melody data's own held-note pattern in this same phrase.
+- Cantonese (`priscilla-chan-night-flight-...`, char-level alignment): "回頭再看未未燈光" landed at
+  46.06-48.02s against real vocals, closely tracking lrclib's own already-decent line timing
+  (45.98s) -- confirms the char-split path (required for CJK, no whitespace word boundaries) works
+  correctly end-to-end, not just the word-split English path.
+- Full `extract_lyrics()` pipeline re-run three times against the real cached
+  `bruno-mars-count-on-me-lyrics` vocal stem (197.52s) with `lyrics_query="Bruno Mars Count on
+  Me"`: consistent, reproducible output across all three runs (284 words, last word "you" ending at
+  190.24s -- sane and within the real audio's own duration, close to lrclib's own raw last-word
+  guess of 189.86s). One earlier one-off run (not reproduced across three subsequent identical
+  calls) produced a clearly-wrong last word past 239s, exceeding the audio's real 197.52s duration
+  -- root-caused as impossible to originate from the forced-alignment layer itself (independently
+  confirmed the emissions tensor's own frame count exactly bounds every possible output timestamp to
+  <=197.54s for this audio), so it has to have come from lrclib's live search API returning
+  different/longer content that one time, interacting with the pre-existing (unmodified by this
+  change) Whisper-based `_repair_synced_lyrics_gaps` gap-filler. Flagged, not chased further, since
+  it didn't reproduce and the component responsible predates this change -- worth a fresh
+  investigation with real evidence if it recurs, per this file's own established convention, rather
+  than more speculative fixing now.
+
+**Not yet done**: none of the already-cached songs have been reprocessed with this change (that
+needs `force=True` through `process_song`/`extract_lyrics`, real per-song compute, and a human
+decision about which cached songs are worth re-running it on) -- this entry covers the pipeline
+code change and its direct verification, not a bulk republish.
