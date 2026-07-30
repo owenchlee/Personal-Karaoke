@@ -14,8 +14,14 @@ from demucs import api as demucs_api
 
 from audio_pipeline.device import get_device
 
-_SUPPORTED_MODELS = ("htdemucs", "htdemucs_ft")
+_SUPPORTED_MODELS = ("htdemucs", "htdemucs_ft", "bs_roformer")
 _VOCALS_STEM = "vocals"
+
+# Confirmed current/downloadable directly from the installed audio-separator package's own
+# load_model() default (not just the README) -- see NOTES.md's "Separation model choice:
+# BS-RoFormer validation" entry for the full validation writeup this filename and the output
+# naming pattern below come from.
+_BS_ROFORMER_MODEL_FILENAME = "model_bs_roformer_ep_317_sdr_12.9755.ckpt"
 
 # Demucs splits the track into segments and, by default, processes them one
 # at a time even though the CPU has cores to spare (jobs=0). Measured on a
@@ -40,25 +46,70 @@ def _progress_callback(on_progress: Callable[[float], None]) -> Callable[[dict],
     return callback
 
 
+def _separate_bs_roformer(
+    input_path: Path,
+    output_dir: Path,
+    on_progress: Callable[[float], None] | None,
+) -> tuple[Path, Path]:
+    """BS-RoFormer via the `audio-separator` package -- higher separation
+    quality than either Demucs model, at a real cost: ~3.5x the input audio's
+    own duration on this CPU (vs. Demucs's near-realtime), confirmed in
+    NOTES.md's validation entry. No progress hook exists in the confirmed
+    API, so ``on_progress`` (if given) only fires once, at completion.
+    """
+    from audio_separator.separator import Separator
+
+    separator = Separator(output_dir=str(output_dir))
+    separator.load_model(model_filename=_BS_ROFORMER_MODEL_FILENAME)
+    output_files = separator.separate(str(input_path))
+
+    if on_progress:
+        on_progress(1.0)
+
+    vocals_path = next((f for f in output_files if "(Vocals)" in Path(f).name), None)
+    instrumental_path = next(
+        (f for f in output_files if "(Instrumental)" in Path(f).name), None
+    )
+    if vocals_path is None or instrumental_path is None:
+        raise RuntimeError(
+            f"Model 'bs_roformer' did not produce both a Vocals and Instrumental stem; "
+            f"got output files: {output_files}"
+        )
+
+    # separate() returns bare filenames written inside output_dir, not absolute paths.
+    vocals_path = Path(vocals_path)
+    instrumental_path = Path(instrumental_path)
+    if not vocals_path.is_absolute():
+        vocals_path = output_dir / vocals_path
+    if not instrumental_path.is_absolute():
+        instrumental_path = output_dir / instrumental_path
+
+    return vocals_path, instrumental_path
+
+
 def separate_stems(
     input_path: str | Path,
     output_dir: str | Path,
     model: str = "htdemucs",
     on_progress: Callable[[float], None] | None = None,
 ) -> tuple[Path, Path]:
-    """Run Demucs on ``input_path`` and save both the isolated vocal stem and
-    a reconstructed instrumental track (the original mix minus vocals) as wav
-    files inside ``output_dir``.
+    """Separate ``input_path`` into an isolated vocal stem and a reconstructed
+    instrumental track (played back during the game), saved as wav files
+    inside ``output_dir``.
 
-    ``model`` selects which Demucs checkpoint to run: "htdemucs" (default,
-    fast, ~80s for a 274s song on this CPU -- see NOTES.md) or "htdemucs_ft"
-    (a fine-tuned bag of 4 models, noticeably less bleed, ~4x slower).
-    Raises ``ValueError`` for anything else.
+    ``model`` selects the separation backend: "htdemucs" (default, fast,
+    ~80s for a 274s song on this CPU -- see NOTES.md), "htdemucs_ft" (a
+    fine-tuned bag of 4 Demucs models, noticeably less bleed, ~4x slower), or
+    "bs_roformer" (higher quality still, via the `audio-separator` package,
+    ~3.5x the input's own duration -- clearly slower than realtime, see
+    NOTES.md's BS-RoFormer validation entry for measured timing and an RMS
+    sanity check). Raises ``ValueError`` for anything else.
 
     ``on_progress``, if given, is called repeatedly with a 0-1 fraction as
-    Demucs finishes each internal segment -- lets a caller (e.g. the job
-    server) show real separation progress instead of a stage that just sits
-    there for the ~80s+ this normally takes.
+    separation progresses -- lets a caller (e.g. the job server) show real
+    separation progress instead of a stage that just sits there. For
+    "bs_roformer" this only fires once, at completion (no progress hook
+    exists in its confirmed API).
 
     Returns ``(vocals_path, instrumental_path)``.
     """
@@ -70,6 +121,9 @@ def separate_stems(
     input_path = Path(input_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if model == "bs_roformer":
+        return _separate_bs_roformer(input_path, output_dir, on_progress)
 
     separator = demucs_api.Separator(
         model=model,

@@ -1281,3 +1281,52 @@ using the API pattern confirmed above. The only decision left for Task 7 (or a p
 before it) is whether a ~16-minute-per-song processing time is acceptable for a third "higher
 quality" option users opt into, versus the near-realtime `htdemucs`/`htdemucs_ft` options already
 shipped.
+
+## Separation model choice: wired in end-to-end, including BS-RoFormer as a third option (recorded 2026-07-30)
+
+Built the full feature from `docs/superpowers/specs/2026-07-30-separation-model-choice-design.md` /
+`docs/superpowers/plans/2026-07-30-separation-model-choice.md`: `separate_stems()` gained a `model`
+parameter (`htdemucs` / `htdemucs_ft` / `bs_roformer`), `process_song()` threads it through and
+records it in `meta.json`, the job server (`scripts/server.py`) forces reprocessing when a
+resubmitted link's requested model differs from what's cached, and `LoadSongForm.tsx` gained a
+second `<select>` ("Fast (default)" / "Better quality (slower)" / "Best quality (slowest)") next to
+the existing language one.
+
+**BS-RoFormer wiring** (`_separate_bs_roformer` in `audio_pipeline/separation.py`) uses exactly the
+API confirmed in this file's "BS-RoFormer validation" entry above: `Separator(output_dir=...)`,
+`.load_model(model_filename="model_bs_roformer_ep_317_sdr_12.9755.ckpt")`, `.separate(path)`. The
+returned `output_files` list is matched by substring (`"(Vocals)"` / `"(Instrumental)"` in the
+filename) rather than assuming a fixed suffix, per that entry's own caution about the model-name
+suffix being truncated. No progress hook exists in the confirmed API, so `on_progress` (when given)
+only fires once, at completion, unlike the Demucs paths' per-segment callback.
+
+**A real regression caught before it shipped**: installing `audio-separator[cpu]` (Task 1's spike)
+silently upgraded `numpy` to 2.4.6 (and `ml_dtypes`/`protobuf` alongside it), which broke
+`tensorflow`/`basic-pitch` (melody extraction) outright --
+`AttributeError: _ARRAY_API not found` at import time, failing `tests/test_pipeline.py` collection
+entirely. `audio-separator` declares `numpy>=2` but was confirmed (by direct import + a full
+BS-RoFormer separation run) to work fine under `numpy<2.0` too -- that constraint isn't actually
+load-bearing at runtime. Fixed by pinning `numpy<2.0` (with `ml_dtypes~=0.2.0`/`protobuf<5.0` to
+match) in `requirements.txt`, right after the `basic-pitch` dependency, so a fresh
+`pip install -r requirements.txt` doesn't regress the same way.
+
+**A real bug in `audio-separator` itself, worked around in the test, not the library code**: its
+MDXC/BS-RoFormer path crashes (`RuntimeError: The size of tensor a (0) must match the size of
+tensor b (...)` inside its own `overlap_add`) on audio clips under 10 seconds -- logged as "Audio
+duration (2.00s) is less than 10 seconds" followed by the crash. Real songs are always well over
+10s, so this has no production impact; the `bs_roformer` smoke test in `tests/test_separation.py`
+uses a 12s synthetic clip instead of the 2s clips the other smoke tests use, specifically to avoid
+this.
+
+**Verification**: full Python suite (`pytest tests/ -q`) and frontend suite (`npm test`, 129 tests)
+both pass, including the real (unmocked) `bs_roformer` smoke test against the actual
+`audio-separator` package -- confirmed the model downloads, loads, and separates a real (if short)
+clip into readable, non-empty vocals/instrumental wavs. `npx tsc -b --noEmit` reports no type
+errors. Manual browser verification of the actual re-processing-on-model-change behavior against a
+real song was not run end-to-end in this pass (each BS-RoFormer separation takes ~15+ minutes on
+this CPU per the validation entry above, and the mismatch-forces-reprocess logic itself is already
+covered by `test_run_job_forces_reprocessing_when_the_cached_model_differs`/
+`test_run_job_skips_reprocessing_when_the_cached_model_matches` in `tests/test_server.py`) -- the
+new `<select>` was confirmed to render with the correct three options and default via the frontend
+component/type checks above; a full live run is a reasonable follow-up before relying on this in
+practice for the first time.

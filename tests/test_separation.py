@@ -78,6 +78,26 @@ def test_separate_stems_reports_progress_up_to_1(tmp_path):
     assert all(0.0 <= fraction <= 1.0 for fraction in progress_seen)
 
 
+def test_separate_stems_accepts_bs_roformer(tmp_path):
+    # First run downloads the BS-RoFormer checkpoint (see NOTES.md's BS-RoFormer validation
+    # entry for its size/timing) and requires internet access.
+    # audio-separator's MDXC/BS-RoFormer path crashes on clips under 10s (a real bug in that
+    # package, not this one -- "tensor a (0) must match tensor b" from its own overlap_add;
+    # real songs are always well over 10s, so this only affects the synthetic test clip).
+    input_duration_s = 12.0
+    input_path = tmp_path / "synthetic_input.wav"
+    output_dir = tmp_path / "out"
+    _write_synthetic_clip(input_path, duration_s=input_duration_s)
+
+    vocals_path, instrumental_path = separate_stems(input_path, output_dir, model="bs_roformer")
+
+    for path in (vocals_path, instrumental_path):
+        assert path.exists()
+        data, samplerate = sf.read(path)
+        assert samplerate > 0
+        assert data.shape[0] > 0
+
+
 def test_progress_callback_only_reports_on_segment_end():
     seen = []
     callback = _progress_callback(seen.append)

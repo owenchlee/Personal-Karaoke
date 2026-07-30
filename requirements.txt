@@ -67,3 +67,12 @@ fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 
 pytest>=8.0.0
+
+# BS-RoFormer separation model (audio_pipeline/separation.py's "bs_roformer" option) --
+# higher-quality vocal isolation than either Demucs model, at a real cost: ~3.5x the input
+# audio's own duration on this CPU (see NOTES.md's "Separation model choice: BS-RoFormer
+# validation" entry for the full confirmed API, timing, and RMS sanity check). Installs cleanly
+# on this Windows/CPU machine, unlike ctc-forced-aligner -- no C++ build step needed. See the
+# numpy pin above: audio-separator declares numpy>=2 but has been confirmed to import and run
+# fine under numpy<2.0 in this same venv, which basic-pitch/tensorflow above requires instead.
+audio-separator[cpu]>=0.44.0
