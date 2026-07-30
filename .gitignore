@@ -33,3 +33,6 @@ frontend/dist/
 
 # Scratch/temp files
 \#TEMP/
+
+# Git worktrees used for isolated feature-branch work
+.worktrees/
