@@ -229,3 +229,28 @@ def master_recording(vocal_path: str | Path, instrumental_path: str | Path, outp
     mastered_path = output_dir / "mastered.wav"
     _mix_and_limit(normalized_vocal_path, normalized_instrumental_path, mastered_path)
     return mastered_path
+
+
+def measure_start_offset(vocal_path: str | Path, instrumental_path: str | Path) -> float:
+    """Measures the real start offset between a raw two-track recording's
+    vocal and instrumental tracks, for tuning ``_RECORDING_OFFSET_SECONDS``
+    (see that constant's docstring and scripts/measure_recording_offset.py,
+    which wraps this for one-off manual calibration against a real
+    recording).
+
+    Expects a take where the singer claps once, sharply, right on the song's
+    first strong instrumental hit -- the clap is the vocal track's first
+    onset; that instrumental hit is the instrumental track's first onset.
+    Returns ``vocal_onset - instrumental_onset`` (positive = the vocal lags,
+    matching ``_RECORDING_OFFSET_SECONDS``'s sign convention).
+    """
+    import librosa  # local import: only this one-off calibration path needs it
+
+    def first_onset_seconds(path: str | Path) -> float:
+        y, sr = librosa.load(str(path), sr=None, mono=True)
+        onset_frames = librosa.onset.onset_detect(y=y, sr=sr, units="frames")
+        if len(onset_frames) == 0:
+            raise ValueError(f"No onset detected in {path}")
+        return float(librosa.frames_to_time(onset_frames[0], sr=sr))
+
+    return first_onset_seconds(vocal_path) - first_onset_seconds(instrumental_path)

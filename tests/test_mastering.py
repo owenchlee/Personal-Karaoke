@@ -17,6 +17,7 @@ from audio_pipeline.mastering import (
     _correct_start_offset,
     _measure_loudness,
     master_recording,
+    measure_start_offset,
 )
 
 
@@ -199,3 +200,24 @@ def test_master_recording_makes_the_vocal_more_prominent_relative_to_input(tmp_p
     before_ratio = 0.02 / 0.3
     after_ratio = spectrum[vocal_bin] / spectrum[instrumental_bin]
     assert after_ratio > before_ratio
+
+
+def test_measure_start_offset_detects_a_synthetic_lag(tmp_path):
+    samplerate = 44100
+    duration_s = 1.0
+    lag_seconds = 0.3
+
+    click = np.zeros(int(duration_s * samplerate), dtype=np.float32)
+    click_start = int(0.1 * samplerate)
+    click[click_start:click_start + 200] = 0.9  # sharp transient
+
+    lag_samples = int(lag_seconds * samplerate)
+    lagged_click = np.concatenate([np.zeros(lag_samples, dtype=np.float32), click])
+
+    vocal_path = tmp_path / "vocal.wav"
+    instrumental_path = tmp_path / "instrumental.wav"
+    sf.write(vocal_path, lagged_click, samplerate)
+    sf.write(instrumental_path, click, samplerate)
+
+    offset = measure_start_offset(vocal_path, instrumental_path)
+    assert offset == pytest.approx(lag_seconds, abs=0.05)
