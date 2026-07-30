@@ -1166,3 +1166,118 @@ Python tests pass total.
 needs `force=True` through `process_song`/`extract_lyrics`, real per-song compute, and a human
 decision about which cached songs are worth re-running it on) -- this entry covers the pipeline
 code change and its direct verification, not a bulk republish.
+
+## Separation model choice: BS-RoFormer validation (recorded 2026-07-30)
+
+Spike to determine whether `audio-separator`'s BS-RoFormer model is viable as a third separation
+option alongside the two already-validated Demucs models (`htdemucs`, `htdemucs_ft`). **Result:
+VIABLE** -- installs cleanly, the Python API works as documented, and the output vocal stem passes
+the same silence-before/energy-after sanity check the rest of this project uses. The one real
+tradeoff: **it's slow**, ~16 minutes of CPU time for a 4.5-minute song, vs. Demucs running close to
+realtime on the same machine.
+
+**Install**: `venv/Scripts/python.exe -m pip install "audio-separator[cpu]"` -- the `[cpu]` extra
+exists and worked on the first try, no fallback to plain `audio-separator` needed. No C++ build
+step, unlike `ctc-forced-aligner`'s Windows failure (see "Deliberately not using the
+`ctc-forced-aligner` PyPI package" above) -- this package ships prebuilt wheels for its native
+dependencies (onnxruntime, torch, etc.), so nothing to compile locally. `pip`'s dependency resolver
+did flag version conflicts against this project's existing `tensorflow-intel` pin (which wants
+`numpy<2.0`, `ml-dtypes~=0.2.0`, `protobuf<5.0`, but `audio-separator` pulled in `numpy==2.4.6`,
+`ml-dtypes==0.5.4`, `protobuf==7.35.1`) -- these are warnings, not install failures, and nothing in
+this spike touched `tensorflow-intel`-dependent code paths, so they weren't chased further here;
+worth a real check before Task 7 wires this into the main pipeline in case those paths overlap.
+
+**Confirmed Python API** (from `help(Separator.__init__)`, `help(Separator.separate)`,
+`help(Separator.load_model)`, and the package's real README fetched via
+`gh api repos/nomadkaraoke/python-audio-separator/readme --jq '.content' | base64 -d` -- not
+guessed from the CLI `--help` text):
+
+```python
+from audio_separator.separator import Separator
+
+separator = Separator(
+    output_dir="<output directory>",       # where output WAVs are written
+    model_file_dir="<model cache directory>",  # where the model file itself is downloaded/cached
+)
+separator.load_model(model_filename="model_bs_roformer_ep_317_sdr_12.9755.ckpt")
+output_files = separator.separate("<path to input audio file>")
+```
+
+`load_model`'s own signature default is literally
+`load_model(self, model_filename='model_bs_roformer_ep_317_sdr_12.9755.ckpt')` -- i.e. the exact
+model filename from prior research is confirmed current directly from the installed package's own
+code, not just the README. The README's "Model Filename" table independently lists this same file
+(Friendly Name "Roformer Model: BS-Roformer-Viperx-1297", arch MDXC, vocals SDR 12.9 /
+instrumental SDR 17.0) and it downloaded successfully when requested (639 MB, from whatever host
+`download_model_files` resolves to -- resolved automatically, no manual URL needed).
+
+**Output file naming**: for a 2-stem model like this one, `separate()` returns a list of two paths,
+one per stem, following the pattern `{input_filename_stem}_({StemName})_{model_filename_without_ext}.wav`
+written into `output_dir`. For this run (input `test_mix.wav`, model
+`model_bs_roformer_ep_317_sdr_12.9755.ckpt`) the exact output filenames produced were:
+
+```
+test_mix_(Vocals)_model_bs_roformer_ep_317_sdr_12.wav
+test_mix_(Instrumental)_model_bs_roformer_ep_317_sdr_12.wav
+```
+
+(Note the model-name suffix is truncated to `..._sdr_12` -- not the full `..._sdr_12.9755` -- this
+is `audio-separator`'s own truncation behavior, not a typo; Task 7's implementer should match
+against stem name in the returned `output_files` list rather than assume a specific suffix length.)
+`custom_output_names` (an optional second arg to `separate()`) can override this with exact names if
+Task 7 wants deterministic filenames instead of parsing the model-suffixed ones.
+
+**Test input**: no original full-mix source audio is cached for any song (`meta.json`'s
+`source_file` fields point to already-deleted temp downloads), so per the plan, reconstructed an
+approximate mix by summing `cache/test-song/vocals.wav` + `cache/test-song/instrumental.wav`
+(44.1kHz, 274.23s) -- valid since `instrumental.wav = original_mix - vocals.wav` was how that file
+was produced in the first place (see `separation.py`'s `instrumental = original_wav - vocals`).
+
+**Timing** (this machine, CPU-only, confirmed via `audio_pipeline/device.py`'s `get_device()`
+returning `"cpu"`; AMD Ryzen, no CUDA GPU):
+- Model download (639 MB, one-time, cached thereafter): ~26s.
+- `load_model()`: 28.97s including that download on the first call; 1.31s on a second call once
+  the model file was already cached locally.
+- `separate()` on the 274.23s test mix: internally chunks into 35 windows, ~27-32s/chunk on this
+  CPU, **959.91s (15:59) total wall-clock** for the actual separation, confirmed by the package's
+  own log line `Separation duration: 00:15:59`. For comparison, this is roughly **3.5x the input
+  audio's own duration** -- i.e. clearly slower than realtime, in contrast to Demucs
+  (`htdemucs`/`htdemucs_ft`), which processes comparable-length songs close to or faster than
+  realtime on the same machine. This is the main practical tradeoff of offering BS-RoFormer as an
+  option: meaningfully higher quality (per the model's own published SDR numbers) at a real
+  multi-minute processing-time cost per song.
+
+**RMS sanity check** (same methodology as `melody_extraction.py`'s `_SILENCE_RMS_GATE` reasoning
+and this project's other manual stem-quality checks), against `test-song`'s known real vocal onset
+(~18.13s per this file's own earlier entries):
+
+```
+BS-RoFormer vocals stem (test_mix_(Vocals)_model_bs_roformer_ep_317_sdr_12.wav):
+  before onset (5-10s):  RMS = 0.003442
+  after onset (20-25s):  RMS = 0.055967
+  ratio after/before:    16.3x
+
+Existing Demucs vocals.wav (cache/test-song/vocals.wav, for direct comparison):
+  before onset (5-10s):  RMS = 0.003560
+  after onset (20-25s):  RMS = 0.060980
+```
+
+Near-silent before the real vocal onset, clearly energetic after it -- the same qualitative shape
+the existing Demucs output already exhibits, and the absolute numbers are close enough between the
+two models (both stem from the same reconstructed input) that BS-RoFormer's separation quality on
+this test file looks at least comparable to Demucs, not obviously worse.
+
+**Operational note for Task 7's implementer**: a background run of this same script silently died
+partway through (~60% through the 35 chunks) when left unattended for an extended period during
+this spike, with no error or traceback captured -- root-caused to the *task-runner/shell session*
+being interrupted, not to `audio-separator` itself (a clean immediate rerun completed normally end
+to end, confirmed by the full `Separation duration: 00:15:59` log line and both output files
+present on disk). Not an `audio-separator` reliability concern, but worth keeping in mind that a
+~16-minute foreground/background call needs a runner that can actually wait that long without being
+torn down early.
+
+**Conclusion**: BS-RoFormer via `audio-separator[cpu]` is viable on this machine. Task 7 can proceed
+using the API pattern confirmed above. The only decision left for Task 7 (or a product decision
+before it) is whether a ~16-minute-per-song processing time is acceptable for a third "higher
+quality" option users opt into, versus the near-realtime `htdemucs`/`htdemucs_ft` options already
+shipped.
