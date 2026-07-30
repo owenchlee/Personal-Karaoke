@@ -177,6 +177,7 @@ def process_song(
     on_progress: Callable[[str, float], None] | None = None,
     language: str | None = None,
     lyrics_query: str | None = None,
+    separation_model: str = "htdemucs",
 ) -> SongAssets:
     """Process ``video_path`` end-to-end into cached instrumental audio and a
     note-event JSON, skipping reprocessing if a cached result already exists
@@ -191,6 +192,10 @@ def process_song(
     used for an online synced-lyrics lookup before falling back to local
     transcription) are passed straight through to ``extract_lyrics`` -- see
     there for details.
+
+    ``separation_model`` ("htdemucs" or "htdemucs_ft") is passed straight
+    through to ``separate_stems`` and recorded in ``meta.json`` so a later
+    caller can tell what a cached song was actually separated with.
     """
     video_path = Path(video_path)
     cache_dir = Path(cache_dir)
@@ -211,7 +216,7 @@ def process_song(
     report("separating")
     extracted_wav = extract_audio(video_path, song_cache_dir)
     vocals_path, instrumental_path = separate_stems(
-        extracted_wav, song_cache_dir,
+        extracted_wav, song_cache_dir, model=separation_model,
         on_progress=(lambda fraction: report("separating", fraction)) if on_progress else None,
     )
 
@@ -236,6 +241,7 @@ def process_song(
         "source_file": str(video_path),
         "song_id": slug,
         "processed_at": datetime.now(timezone.utc).isoformat(),
+        "separation_model": separation_model,
     }
     (song_cache_dir / _META_FILENAME).write_text(json.dumps(meta, indent=2))
 

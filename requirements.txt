@@ -18,6 +18,14 @@ demucs>=4.0.0,<5
 # alongside torch 2.13+ with no dependency conflict.
 basic-pitch[onnx]>=0.3.0
 
+# Pinned explicitly: tensorflow 2.15 (pulled in by basic-pitch above) was built
+# against numpy's 1.x C-API and fails to import ("AttributeError: _ARRAY_API not
+# found") under numpy 2.x. audio-separator (see the BS-RoFormer separation model
+# below) declares numpy>=2 but has been confirmed to import and run fine under
+# numpy<2.0 in this same venv regardless -- that declared constraint isn't
+# actually load-bearing at runtime, so this pin resolves the conflict for both.
+numpy<2.0
+
 # Pulled in transitively by basic-pitch, but imported directly by
 # tests/test_melody_extraction.py -- pinned explicitly here.
 pretty_midi>=0.2.10
