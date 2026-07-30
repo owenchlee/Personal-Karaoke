@@ -1330,3 +1330,26 @@ covered by `test_run_job_forces_reprocessing_when_the_cached_model_differs`/
 new `<select>` was confirmed to render with the correct three options and default via the frontend
 component/type checks above; a full live run is a reasonable follow-up before relying on this in
 practice for the first time.
+
+## Separation model choice: end-to-end verification (recorded 2026-07-30)
+
+Full automated suite: `pytest tests/ -q` -- **167 passed** (includes the real, unmocked
+`htdemucs_ft` and `bs_roformer` smoke tests in `tests/test_separation.py`, and the job-server
+cache-mismatch tests in `tests/test_server.py`). Frontend: `npm test` -- **129 passed**; `npx tsc -b
+--noEmit` / `npm run build` -- no type errors.
+
+Manual browser check (both the job server and Vite dev server already running locally): opened
+"Load a song", confirmed the new vocal-separation-quality `<select>` renders next to the language
+select, defaulted to "Fast (default)" (`htdemucs`), with all three options present in the correct
+order and mapped to the right internal values (`htdemucs` / `htdemucs_ft` / `bs_roformer`) --
+confirmed via the page's accessibility tree, not just visually. Submitting with the default
+selection is unchanged from before this feature (no new field affects the fast path). A full live
+run of the cache-mismatch-forces-reprocess behavior (resubmitting an already-cached link with a
+different model and watching it actually reprocess) was not exercised end-to-end in the browser in
+this pass -- each BS-RoFormer run alone takes 15+ minutes on this CPU, and that logic is already
+covered directly by `test_run_job_forces_reprocessing_when_the_cached_model_differs` /
+`test_run_job_skips_reprocessing_when_the_cached_model_matches` in `tests/test_server.py`. Worth a
+real end-to-end run before relying on it for an actual multi-minute BS-RoFormer job in practice.
+
+Feature ships complete: all three separation models (`htdemucs`/`htdemucs_ft`/`bs_roformer`)
+selectable at upload, correctly recorded and compared for re-cache decisions.
