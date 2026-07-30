@@ -66,6 +66,10 @@ uroman>=1.3.0
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 
+# Required by FastAPI's File()/Form() params (scripts/server.py's recording upload
+# endpoint) to parse multipart/form-data request bodies.
+python-multipart>=0.0.9
+
 pytest>=8.0.0
 
 # BS-RoFormer separation model (audio_pipeline/separation.py's "bs_roformer" option) --

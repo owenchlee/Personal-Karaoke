@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from audio_pipeline.device import get_device_info  # noqa: E402
 from audio_pipeline.download import download_audio, probe_title  # noqa: E402
+from audio_pipeline.mastering import master_recording  # noqa: E402
 from audio_pipeline.pipeline import is_cached, process_song, slugify  # noqa: E402
 from audio_pipeline.transcode import transcode_to_mp3  # noqa: E402
 from publish_song import publish_song  # noqa: E402
@@ -378,15 +379,21 @@ def _recording_path(filename: str) -> Path:
 
 
 @app.post("/api/recordings/mp3")
-async def render_recording_mp3(request: Request, song_id: str = "recording") -> FileResponse:
-    """Transcode a recorded webm blob (the browser's MediaRecorder output --
-    already mixed voice + instrumental client-side, see
-    frontend/src/hooks/useRecording.ts) into an mp3, save it under
-    RECORDINGS_DIR so it shows up in the "My recordings" list later, and
-    return it directly so the browser can also download it immediately.
+async def render_recording_mp3(
+    vocal: UploadFile = File(...),
+    instrumental: UploadFile = File(...),
+    song_id: str = Form("recording"),
+) -> FileResponse:
+    """Master (denoise/balance/align -- see audio_pipeline/mastering.py) and
+    transcode a recorded take -- the browser's separately-recorded vocal and
+    instrumental MediaRecorder tracks, see frontend/src/hooks/useRecording.ts
+    -- into an mp3, save it under RECORDINGS_DIR so it shows up in the "My
+    recordings" list later, and return it directly so the browser can also
+    download it immediately.
     """
-    webm_bytes = await request.body()
-    if not webm_bytes:
+    vocal_bytes = await vocal.read()
+    instrumental_bytes = await instrumental.read()
+    if not vocal_bytes or not instrumental_bytes:
         raise HTTPException(status_code=400, detail="Empty recording")
 
     slug = slugify(song_id)
@@ -396,10 +403,13 @@ async def render_recording_mp3(request: Request, song_id: str = "recording") -> 
     saved_path = RECORDINGS_DIR / f"{slug}__{epoch_seconds}.mp3"
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        input_path = Path(tmp_dir) / "input.webm"
-        input_path.write_bytes(webm_bytes)
+        vocal_path = Path(tmp_dir) / "vocal.webm"
+        instrumental_path = Path(tmp_dir) / "instrumental.webm"
+        vocal_path.write_bytes(vocal_bytes)
+        instrumental_path.write_bytes(instrumental_bytes)
         try:
-            mp3_path = transcode_to_mp3(input_path, Path(tmp_dir))
+            mastered_path = master_recording(vocal_path, instrumental_path, Path(tmp_dir) / "mastered")
+            mp3_path = transcode_to_mp3(mastered_path, Path(tmp_dir))
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         shutil.copy(mp3_path, saved_path)

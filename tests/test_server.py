@@ -11,7 +11,9 @@ import sys
 import threading
 from pathlib import Path
 
+import numpy as np
 import pytest
+import soundfile as sf
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -548,6 +550,76 @@ def test_delete_recording_404s_for_unknown_filename(tmp_path, monkeypatch):
     response = client.delete("/api/recordings/does-not-exist__1700000000.mp3")
 
     assert response.status_code == 404
+
+
+def test_render_recording_mp3_masters_both_uploaded_tracks_and_saves_the_take(tmp_path, monkeypatch):
+    recordings_dir = tmp_path / "recordings"
+    monkeypatch.setattr(server, "RECORDINGS_DIR", recordings_dir)
+
+    calls = []
+
+    def fake_master_recording(vocal_path, instrumental_path, output_dir):
+        calls.append((Path(vocal_path).read_bytes(), Path(instrumental_path).read_bytes()))
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        mastered_path = output_dir / "mastered.wav"
+        t = np.linspace(0, 0.5, 22050, endpoint=False)
+        tone = (0.2 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+        sf.write(mastered_path, tone, 44100)
+        return mastered_path
+
+    monkeypatch.setattr(server, "master_recording", fake_master_recording)
+
+    response = client.post(
+        "/api/recordings/mp3",
+        files={
+            "vocal": ("vocal.webm", b"fake vocal bytes", "audio/webm"),
+            "instrumental": ("instrumental.webm", b"fake instrumental bytes", "audio/webm"),
+        },
+        data={"song_id": "My Song"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/mpeg"
+    assert calls == [(b"fake vocal bytes", b"fake instrumental bytes")]
+
+    saved = list(recordings_dir.glob("my-song__*.mp3"))
+    assert len(saved) == 1
+
+
+def test_render_recording_mp3_rejects_an_empty_track(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "RECORDINGS_DIR", tmp_path / "recordings")
+
+    response = client.post(
+        "/api/recordings/mp3",
+        files={
+            "vocal": ("vocal.webm", b"", "audio/webm"),
+            "instrumental": ("instrumental.webm", b"fake instrumental bytes", "audio/webm"),
+        },
+        data={"song_id": "My Song"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_render_recording_mp3_returns_500_when_mastering_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "RECORDINGS_DIR", tmp_path / "recordings")
+
+    def fake_master_recording(vocal_path, instrumental_path, output_dir):
+        raise RuntimeError("ffmpeg failed to clean vocal: boom")
+
+    monkeypatch.setattr(server, "master_recording", fake_master_recording)
+
+    response = client.post(
+        "/api/recordings/mp3",
+        files={
+            "vocal": ("vocal.webm", b"fake vocal bytes", "audio/webm"),
+            "instrumental": ("instrumental.webm", b"fake instrumental bytes", "audio/webm"),
+        },
+        data={"song_id": "My Song"},
+    )
+
+    assert response.status_code == 500
 
 
 def test_overall_progress_maps_stage_fraction_into_its_weighted_span():
