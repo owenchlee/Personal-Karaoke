@@ -21,6 +21,8 @@ from pathlib import Path
 import ffmpeg
 import soundfile as sf
 
+from audio_pipeline.transcode import transcode_to_wav
+
 # Positive = the vocal (mic) track lags the instrumental in a raw two-track recording.
 # The mic capture path (getUserMedia -> hardware -> driver buffering) has real warm-up
 # latency the instrumental's already-decoded <audio> element source doesn't, so the
@@ -164,3 +166,66 @@ def _apply_loudnorm(input_path: Path, output_path: Path, target_i: float) -> Pat
         raise RuntimeError(f"ffmpeg failed to normalize loudness of {input_path}: {stderr_text}") from exc
 
     return output_path
+
+
+_VOCAL_TARGET_LUFS = -16
+_INSTRUMENTAL_TARGET_LUFS = -20
+_LIMITER_CEILING = 0.95
+
+
+def _mix_and_limit(vocal_path: Path, instrumental_path: Path, output_path: Path) -> Path:
+    """Mixes the two loudness-normalized tracks and applies a final limiter so
+    the vocal's loudness boost can't clip the combined output. ``normalize=0``
+    on ``amix`` keeps the loudnorm targets intact -- amix's own default
+    (``normalize=1``) would auto-scale both inputs down by input count,
+    undoing the deliberate vocal-vs-instrumental balance.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    vocal_stream = ffmpeg.input(str(vocal_path))
+    instrumental_stream = ffmpeg.input(str(instrumental_path))
+
+    try:
+        (
+            ffmpeg.filter([vocal_stream, instrumental_stream], "amix", inputs=2, duration="longest", normalize=0)
+            .filter("alimiter", limit=_LIMITER_CEILING)
+            .output(str(output_path))
+            .overwrite_output()
+            .run(capture_stdout=True, capture_stderr=True)
+        )
+    except ffmpeg.Error as exc:
+        stderr_text = exc.stderr.decode(errors="replace") if exc.stderr else ""
+        raise RuntimeError(f"ffmpeg failed to mix vocal and instrumental into {output_path}: {stderr_text}") from exc
+
+    return output_path
+
+
+def master_recording(vocal_path: str | Path, instrumental_path: str | Path, output_dir: str | Path) -> Path:
+    """Auto-balance and clean up a player's recorded take -- the single entry
+    point scripts/server.py calls. ``vocal_path``/``instrumental_path`` are
+    the two separately-recorded tracks from useRecording.ts, in any
+    container/codec ffmpeg can read (in practice, webm/opus). Returns the
+    path to the mastered wav (start-aligned, vocal cleaned and balanced
+    louder than the instrumental, mixed, limited against clipping).
+    """
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    vocal_wav = transcode_to_wav(vocal_path, output_dir)
+    instrumental_wav = transcode_to_wav(instrumental_path, output_dir)
+
+    aligned_vocal_path, aligned_instrumental_path = _correct_start_offset(
+        vocal_wav, instrumental_wav, output_dir
+    )
+    cleaned_vocal_path = _clean_vocal(aligned_vocal_path, output_dir)
+    normalized_vocal_path = _apply_loudnorm(
+        cleaned_vocal_path, output_dir / "vocal_normalized.wav", _VOCAL_TARGET_LUFS
+    )
+    normalized_instrumental_path = _apply_loudnorm(
+        aligned_instrumental_path, output_dir / "instrumental_normalized.wav", _INSTRUMENTAL_TARGET_LUFS
+    )
+
+    mastered_path = output_dir / "mastered.wav"
+    _mix_and_limit(normalized_vocal_path, normalized_instrumental_path, mastered_path)
+    return mastered_path

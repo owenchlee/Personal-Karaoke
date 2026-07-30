@@ -11,7 +11,13 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from audio_pipeline.mastering import _apply_loudnorm, _clean_vocal, _correct_start_offset, _measure_loudness
+from audio_pipeline.mastering import (
+    _apply_loudnorm,
+    _clean_vocal,
+    _correct_start_offset,
+    _measure_loudness,
+    master_recording,
+)
 
 
 def _write_tone(path, duration_s=3.0, samplerate=44100, freq_hz=220.0, amplitude=0.2):
@@ -144,3 +150,52 @@ def test_apply_loudnorm_raises_a_clear_error_on_a_bogus_input(tmp_path):
 
     with pytest.raises(RuntimeError, match="ffmpeg failed to measure loudness"):
         _apply_loudnorm(bogus_path, tmp_path / "out.wav", target_i=-16)
+
+
+def test_master_recording_produces_a_playable_wav(tmp_path):
+    vocal_path = tmp_path / "vocal.wav"
+    instrumental_path = tmp_path / "instrumental.wav"
+    _write_tone(vocal_path, freq_hz=440.0, amplitude=0.05)
+    _write_tone(instrumental_path, freq_hz=220.0, amplitude=0.2)
+
+    mastered_path = master_recording(vocal_path, instrumental_path, tmp_path / "out")
+
+    assert mastered_path.exists()
+    data, samplerate = sf.read(mastered_path)
+    assert samplerate > 0
+    assert data.shape[0] > 0
+    assert not np.isnan(data).any()
+    duration_s = data.shape[0] / samplerate
+    assert duration_s == pytest.approx(3.0, abs=0.5)
+
+
+def test_master_recording_does_not_clip(tmp_path):
+    vocal_path = tmp_path / "vocal.wav"
+    instrumental_path = tmp_path / "instrumental.wav"
+    _write_tone(vocal_path, freq_hz=440.0, amplitude=0.9)
+    _write_tone(instrumental_path, freq_hz=220.0, amplitude=0.9)
+
+    mastered_path = master_recording(vocal_path, instrumental_path, tmp_path / "out")
+
+    data, _ = sf.read(mastered_path)
+    assert np.max(np.abs(data)) <= 1.0
+
+
+def test_master_recording_makes_the_vocal_more_prominent_relative_to_input(tmp_path):
+    duration_s = 3.0
+    samplerate = 44100
+    vocal_path = tmp_path / "vocal.wav"
+    instrumental_path = tmp_path / "instrumental.wav"
+    _write_tone(vocal_path, duration_s=duration_s, samplerate=samplerate, freq_hz=440.0, amplitude=0.02)
+    _write_tone(instrumental_path, duration_s=duration_s, samplerate=samplerate, freq_hz=880.0, amplitude=0.3)
+
+    mastered_path = master_recording(vocal_path, instrumental_path, tmp_path / "out")
+
+    mastered, _ = sf.read(mastered_path)
+    spectrum = np.abs(np.fft.rfft(mastered.astype(np.float32)))
+    vocal_bin = int(round(440.0 * duration_s))
+    instrumental_bin = int(round(880.0 * duration_s))
+
+    before_ratio = 0.02 / 0.3
+    after_ratio = spectrum[vocal_bin] / spectrum[instrumental_bin]
+    assert after_ratio > before_ratio
