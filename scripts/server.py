@@ -35,6 +35,7 @@ from pydantic import BaseModel
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from audio_pipeline.device import get_device_info  # noqa: E402
 from audio_pipeline.download import download_audio, probe_title  # noqa: E402
 from audio_pipeline.pipeline import is_cached, process_song, slugify  # noqa: E402
 from audio_pipeline.transcode import transcode_to_mp3  # noqa: E402
@@ -248,6 +249,16 @@ def get_job(job_id: str) -> dict:
             "slug": job.slug,
             "error": job.error,
         }
+
+
+@app.get("/api/gpu-status")
+def get_gpu_status() -> dict:
+    """Whether processing (separation/melody/lyrics) will run on an
+    NVIDIA/CUDA GPU or fall back to CPU -- lets the frontend show "NVIDIA GPU
+    detected" next to the separation-model picker instead of leaving users to
+    guess.
+    """
+    return get_device_info()
 
 
 @app.get("/api/songs")

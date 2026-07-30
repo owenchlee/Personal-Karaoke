@@ -603,6 +603,11 @@ code {
   cursor: default;
 }
 
+.gpu-status {
+  margin-top: var(--space-1);
+  font-size: 0.85em;
+}
+
 .job-progress {
   margin-top: var(--space-1);
   display: flex;

@@ -1353,3 +1353,19 @@ real end-to-end run before relying on it for an actual multi-minute BS-RoFormer 
 
 Feature ships complete: all three separation models (`htdemucs`/`htdemucs_ft`/`bs_roformer`)
 selectable at upload, correctly recorded and compared for re-cache decisions.
+
+## GPU-detection status shown on the load-song form (recorded 2026-07-30)
+
+Both separation backends already auto-select CUDA when available (Demucs via
+`audio_pipeline/device.py`'s `get_device()`, BS-RoFormer via `audio-separator`'s own internal
+`torch.cuda.is_available()` check) -- but nothing surfaced that to the user, so there was no way to
+tell from the UI whether a given machine was actually using its GPU. Added `get_device_info()` to
+`audio_pipeline/device.py` (`{"available": bool, "name": str | None}`, via
+`torch.cuda.get_device_name(0)`) and a `GET /api/gpu-status` endpoint in `scripts/server.py` that
+returns it directly. `LoadSongForm.tsx` fetches it once on mount and renders "NVIDIA GPU detected
+(<name>) -- processing will use it to speed things up" or "No NVIDIA GPU detected -- processing
+will run on CPU" under the separation-model select. Verified: `pytest tests/test_device.py
+tests/test_server.py -q` -- 31 passed; frontend `npx vitest run` -- 129 passed; `npx tsc -b
+--noEmit` -- clean. Not manually verified against a real NVIDIA GPU (this dev machine is CPU-only)
+-- confirmed via mocked `torch.cuda.is_available`/`get_device_name` instead, same pattern as the
+existing `get_device()` tests.

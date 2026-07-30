@@ -12,11 +12,17 @@ interface LoadSongFormProps {
 type LanguageOption = '' | 'en' | 'yue'
 type SeparationModelOption = 'htdemucs' | 'htdemucs_ft' | 'bs_roformer'
 
+interface GpuStatus {
+  available: boolean
+  name: string | null
+}
+
 function LoadSongForm({ onLoaded }: LoadSongFormProps) {
   const [url, setUrl] = useState('')
   const [language, setLanguage] = useState<LanguageOption>('')
   const [separationModel, setSeparationModel] = useState<SeparationModelOption>('htdemucs')
   const [job, setJob] = useState<JobState | null>(null)
+  const [gpuStatus, setGpuStatus] = useState<GpuStatus | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const stopPolling = () => {
@@ -27,6 +33,13 @@ function LoadSongForm({ onLoaded }: LoadSongFormProps) {
   }
 
   useEffect(() => stopPolling, [])
+
+  useEffect(() => {
+    fetch('/api/gpu-status')
+      .then((response) => (response.ok ? (response.json() as Promise<GpuStatus>) : null))
+      .then((status) => setGpuStatus(status))
+      .catch(() => setGpuStatus(null))
+  }, [])
 
   const pollJob = (jobId: string) => {
     pollRef.current = setInterval(() => {
@@ -133,6 +146,14 @@ function LoadSongForm({ onLoaded }: LoadSongFormProps) {
           {isBusy ? 'Processing…' : 'Load'}
         </button>
       </div>
+
+      {gpuStatus && (
+        <p className="gpu-status muted" role="status">
+          {gpuStatus.available
+            ? `NVIDIA GPU detected${gpuStatus.name ? ` (${gpuStatus.name})` : ''} — processing will use it to speed things up`
+            : 'No NVIDIA GPU detected — processing will run on CPU'}
+        </p>
+      )}
 
       {job && job.status !== 'error' && (
         <div className="job-progress" role="status">

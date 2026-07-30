@@ -22,6 +22,26 @@ import server  # noqa: E402
 client = TestClient(server.app)
 
 
+def test_get_gpu_status_reports_the_detected_device(monkeypatch):
+    monkeypatch.setattr(
+        server, "get_device_info", lambda: {"available": True, "name": "NVIDIA GeForce RTX 3060"}
+    )
+
+    response = client.get("/api/gpu-status")
+
+    assert response.status_code == 200
+    assert response.json() == {"available": True, "name": "NVIDIA GeForce RTX 3060"}
+
+
+def test_get_gpu_status_reports_cpu_fallback(monkeypatch):
+    monkeypatch.setattr(server, "get_device_info", lambda: {"available": False, "name": None})
+
+    response = client.get("/api/gpu-status")
+
+    assert response.status_code == 200
+    assert response.json() == {"available": False, "name": None}
+
+
 def test_list_songs_returns_empty_when_nothing_published(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "CACHE_DIR", tmp_path / "cache")
     monkeypatch.setattr(server, "PUBLIC_DIR", tmp_path / "public")
