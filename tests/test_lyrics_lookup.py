@@ -156,6 +156,21 @@ def test_parse_title_falls_back_to_the_raw_query_when_cleaning_empties_it():
     assert _parse_title("(Official Video)") == ("(Official Video)", None)
 
 
+def test_parse_title_strips_bare_noise_tags_glued_onto_cjk_words():
+    # Real Cantonese upload title: promotional tags ("lossless FLAC", "lyrics", "pure enjoy") glued
+    # directly onto CJK words with no bracket and no space -- confirmed live against lrclib that the
+    # raw title returns zero search results, silently falling through to local transcription, while
+    # the cleaned title matches the correct song immediately (see the module comment above
+    # `_strip_noise_tokens`).
+    assert _parse_title("陳慧嫻 夜機 無損音樂FLAC 歌詞LYRICS 純享") == ("陳慧嫻 夜機", None)
+
+
+def test_parse_title_bare_noise_stripping_does_not_eat_a_real_short_word():
+    # A real bare title word must not be dropped just because a noise keyword is a substring of it
+    # somewhere in the middle -- only an exact/prefix/suffix match counts as noise.
+    assert _parse_title("Redheaded Stranger") == ("Redheaded Stranger", None)
+
+
 def test_fetch_synced_lyrics_uses_structured_search_when_an_artist_is_present():
     response = Mock()
     response.json.return_value = [{"syncedLyrics": "[00:00.00]Hello world", "duration": 100}]

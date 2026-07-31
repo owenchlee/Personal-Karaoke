@@ -38,9 +38,9 @@ _NOISE_KEYWORDS = (
     "official", "video", "audio", "lyric", "visualizer", "visualiser", "vevo",
     "hd", "hq", "4k", "8k", "uhd", "mv", "m/v", "remaster", "explicit", "clean version",
     "full song", "with lyrics", "color coded", "colour coded", "karaoke", "instrumental",
-    "feat", "ft", "featuring", "prod", "cover",
-    # Common Cantonese/Chinese upload tags (official / lyrics / subtitles).
-    "官方", "歌詞", "歌词", "字幕", "純音樂", "高清",
+    "feat", "ft", "featuring", "prod", "cover", "flac", "lossless",
+    # Common Cantonese/Chinese upload tags (official / lyrics / subtitles / lossless / pure enjoy).
+    "官方", "歌詞", "歌词", "字幕", "純音樂", "高清", "無損", "无损", "純享", "纯享",
 )
 
 # Bracketed groups in ASCII and full-width/CJK bracket conventions, non-nested.
@@ -66,17 +66,45 @@ def _strip_feat(text: str) -> str:
     return _FEAT_RE.sub("", text).strip().strip(_SURROUNDING_QUOTES).strip()
 
 
+# Cantonese/Chinese uploads routinely glue a promotional tag directly onto the title with no
+# bracket and no space at all -- e.g. "陳慧嫻 夜機 無損音樂FLAC 歌詞LYRICS 純享" ("... lossless-music-FLAC
+# lyrics-LYRICS pure-enjoy"), where "無損音樂FLAC"/"歌詞LYRICS" are each a single whitespace-delimited
+# token combining a CJK label with its English tag. `_strip_noise_brackets` only ever sees bracketed
+# noise, so text like this reaches lrclib's search verbatim -- confirmed directly against the live
+# API: the raw query returns zero results (lrclib's full-text search appears to require every term to
+# match), silently falling all the way through to local Whisper transcription instead of the correct
+# known-good lyrics, while the same title cleaned down to just "陳慧嫻 夜機" matches the right song
+# immediately. Matched by prefix/suffix/exact-equality per token rather than "keyword anywhere in the
+# token" (looser substring matching, safe for the whole-bracket-content check above, is more likely to
+# false-positive here since a real bare title word could coincidentally contain a short keyword like
+# "hd" or "mv" mid-word) -- every real noise tag observed glues on cleanly at one edge of the token,
+# never buried in the middle of an unrelated word.
+def _strip_noise_tokens(text: str) -> str:
+    def is_noise(token: str) -> bool:
+        lowered = token.lower()
+        return any(
+            lowered == keyword or lowered.startswith(keyword) or lowered.endswith(keyword)
+            for keyword in _NOISE_KEYWORDS
+        )
+
+    return " ".join(token for token in text.split() if not is_noise(token))
+
+
 def _parse_title(raw_query: str) -> tuple[str, str | None]:
     """Split a raw source title into ``(track, artist)`` for an lrclib lookup, stripping the
     promotional noise a video title carries but a track title doesn't (see the module comment above
-    ``_NOISE_KEYWORDS``). ``artist`` is ``None`` when the title has no recognizable "Artist - Title"
-    split, in which case callers should fall back to a plain free-text search on ``track``.
+    ``_NOISE_KEYWORDS`` and ``_strip_noise_tokens``). ``artist`` is ``None`` when the title has no
+    recognizable "Artist - Title" split, in which case callers should fall back to a plain free-text
+    search on ``track``.
     """
     cleaned = _strip_noise_brackets(raw_query)
     parts = _DASH_SPLIT_RE.split(cleaned, maxsplit=1)
-    if len(parts) == 2 and _strip_feat(parts[0]) and _strip_feat(parts[1]):
-        return _strip_feat(parts[1]), _strip_feat(parts[0])
-    track = _strip_feat(cleaned)
+    if len(parts) == 2:
+        track = _strip_noise_tokens(_strip_feat(parts[1]))
+        artist = _strip_noise_tokens(_strip_feat(parts[0]))
+        if track and artist:
+            return track, artist
+    track = _strip_noise_tokens(_strip_feat(cleaned))
     # If cleaning stripped everything (a title that was pure noise), keep the original rather than
     # searching for an empty string.
     return (track or raw_query.strip()), None

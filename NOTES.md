@@ -1531,3 +1531,56 @@ model download, with `get_device()` confirmed returning `"cuda"` throughout. No 
 song was available in this reset environment to redo the exact NOTES.md Phase 0 timing comparison
 (79.9s CPU baseline) apples-to-apples -- that would need a real song plus `ffmpeg` installed, both
 out of scope here.
+
+## Bare (unbracketed) promotional tags defeating the lrclib title cleanup (recorded 2026-07-31)
+
+Reported: inaccurate lyrics on a real Cantonese song (`flac-lyrics` / 陳慧嫻 "夜機"), and the note
+highway still showing notes during its hummed intro (the latter previously fixed by
+`pipeline._remove_notes_without_lyrics`, see "Highway notes with no corresponding lyrics" above).
+
+**Root cause**: the video's raw YouTube title is "陳慧嫻　夜機　無損音樂FLAC　歌詞LYRICS　純享" --
+`lyrics_lookup._parse_title`'s noise stripping (`_strip_noise_brackets`) only removes
+`_NOISE_KEYWORDS` when they appear inside a bracket/parenthesis group, but this title has none: the
+promotional tags ("lossless-music-FLAC", "lyrics-LYRICS", "pure-enjoy") are glued directly onto
+adjacent CJK words with no bracket and no space at all -- an extremely common convention on
+Cantonese/Mandopop uploads. Confirmed directly against the live lrclib API: the raw, uncleaned title
+sent as a free-text query returns **zero** results (lrclib's search appears to require every query
+term to match, so a handful of noise words is enough to break it entirely), while the same title
+cleaned down to just "陳慧嫻 夜機" matches the correct song immediately (multiple synced-lyrics
+candidates). The zero-result lookup silently fell through to local Whisper transcription of the
+intro's ambiguous hummed audio, primed with the same noisy title as a `hotwords` hint -- which
+hallucinated fragments of that hotword text itself ("FL", "AC", "詞", "IC") as the song's first
+"lyric" line at ~0.3-1.2s. That bogus early line then defeated
+`pipeline._remove_notes_without_lyrics`: it gave the intro a (fake) lyric-coverage span, so the
+real hummed notes there were kept instead of stripped as intended.
+
+**Fix**: `lyrics_lookup._strip_noise_tokens`, a new pass applied to the title after bracket-stripping
+and feat-credit-stripping (in `_parse_title`) -- splits on whitespace and drops any token that
+exactly equals, starts with, or ends with a `_NOISE_KEYWORDS` entry (case-insensitive). Deliberately
+prefix/suffix/equality matching rather than "keyword anywhere in the token" (the looser check
+`_strip_noise_brackets` already uses for bracket contents): every real glued-tag pattern observed
+attaches cleanly at one edge of a token ("無損音樂**FLAC**", "**歌詞**LYRICS"), and a substring-anywhere
+check risks eating a real bare title word that just happens to contain a short keyword like "hd" or
+"mv" mid-word. Added `"flac"`, `"lossless"`, `"無損"`/`"无损"`, `"純享"`/`"纯享"` to `_NOISE_KEYWORDS`
+(not previously listed at all). Ordered after `_strip_feat` specifically so it can't collide with the
+existing `ft`/`feat` featuring-credit stripping (which already handles those exact tokens via regex
+matching to end-of-string).
+
+**Verified**: live-queried the real lrclib API before and after -- raw title 0 results, cleaned title
+("陳慧嫻 夜機") 9 results including 5 with synced lyrics for the correct song/artist. 2 new
+`tests/test_lyrics_lookup.py` cases (the real glued-tag title parses to `("陳慧嫻 夜機", None)`; a
+control case confirms a real word like "Redheaded" isn't eaten just for containing "hd"). All 35
+`test_lyrics_lookup.py` tests and 85/86 of `tests/` pass (the one failure,
+`test_process_song_runs_end_to_end_and_produces_assets`, reproduces identically on unmodified `main`
+-- pre-existing `ffmpeg` PATH gap in this shell, unrelated to this change).
+
+**Applied to the real cached song**: `scripts/reprocess_from_vocals.py flac-lyrics` (existing tool,
+reuses the cached `vocals.wav`, no re-download/re-separation needed) with ffmpeg added to `PATH` for
+the run. Confirmed directly on the regenerated output: `lyrics.json`'s first word is now the real
+"回" at 46.16s (previously "FL" at 0.34s), and `notes.json`'s first note now starts at 46.2605s
+(previously 0.743s) -- the hummed-intro notes are gone, matching the lyric-coverage-based removal
+this song already relied on once its lyric timeline starts in the right place. Republished to
+`frontend/public/cache/flac-lyrics/` by the same script. Not re-applied to any other cached song --
+this bug only reproduces for a title carrying this specific glued-tag pattern; a targeted rerun of
+`--all` would be the way to sweep every cached song if more turn out to be affected, not done here
+since it wasn't reported for any other song.
