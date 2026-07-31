@@ -1369,3 +1369,64 @@ tests/test_server.py -q` -- 31 passed; frontend `npx vitest run` -- 129 passed; 
 --noEmit` -- clean. Not manually verified against a real NVIDIA GPU (this dev machine is CPU-only)
 -- confirmed via mocked `torch.cuda.is_available`/`get_device_name` instead, same pattern as the
 existing `get_device()` tests.
+
+## Auto-balance and clean up recordings (recorded 2026-07-30)
+
+Built per `docs/superpowers/specs/2026-07-30-auto-balance-recording-design.md` /
+`docs/superpowers/plans/2026-07-30-auto-balance-recording.md`, via subagent-driven-development in
+an isolated worktree (`.worktrees/auto-balance-recording`, branch `auto-balance-recording`).
+Requested: the singer's voice should come through loud enough and sound "professional" against the
+background music on a saved recording, and the mic should get cleaned up if the recording quality
+is bad -- plus, raised mid-brainstorm, recordings sounded shifted from the start when played back.
+
+**What was built**: `useRecording.ts` now records the instrumental and live mic as two separate
+`MediaRecorder` tracks (previously mixed into one at record time) and uploads both to
+`POST /api/recordings/mp3` as a multipart form. A new `audio_pipeline/mastering.py::master_recording()`
+chains: transcode both tracks to wav -> correct a constant start-offset between them
+(`_correct_start_offset`, using a measured -- not guessed -- `_RECORDING_OFFSET_SECONDS` constant)
+-> clean the vocal (highpass @90Hz, `afftdn` denoise, `acompressor`) -> two-pass `loudnorm` each
+track independently (vocal -16 LUFS, instrumental -20 LUFS -- narrowed from an initial -14/-20 split
+after feedback that the voice was too loud) -> mix (`amix`, `normalize=0` to preserve the loudnorm
+balance) -> `alimiter` so the vocal boost can't clip. `scripts/server.py`'s recording endpoint calls
+this before its existing mp3 transcode step, unchanged from there on (same save/download/list/delete
+behavior). A new `audio_pipeline/mastering.py::measure_start_offset()` (real onset detection via
+`librosa.onset.onset_detect`) plus `scripts/measure_recording_offset.py`, a thin CLI wrapper, exist
+so a human can determine the real offset value from an actual test recording -- deliberately
+separate from the production pipeline, not auto-run.
+
+**Automated verification**: full suite run in the worktree after all 9 plan tasks landed (task-by-task
+review loop, one Critical/Important-free approval per task except Task 3's rumble test, corrected
+below) -- `pytest tests/ -q`: **187 passed**. Frontend: `npm test` -- **129 passed**; `npx tsc -b
+--noEmit` -- clean. Every new test in `tests/test_mastering.py` is a real, unmocked smoke test
+against synthetic audio (sine tones, synthetic clicks/transients), matching this project's
+established convention -- no mocking of ffmpeg or librosa anywhere in that file. `tests/test_server.py`
+mocks `master_recording` at the endpoint layer only (to isolate endpoint plumbing, same pattern
+already used there for `process_song`/`download_audio`), while feeding it a real generated wav so
+the endpoint's own real `transcode_to_mp3` call still exercises actual ffmpeg end-to-end.
+
+**One real measured-margin issue caught during review, not shipped**: Task 3's first commit had a
+rumble-removal test asserting 90% attenuation with a synthetic 40Hz tone against the 90Hz highpass
+cutoff; real ffmpeg only delivered ~85% at that separation (measured, not guessed). Fixed by moving
+the test tone to 20Hz (a more realistic rumble frequency anyway -- real handling noise/thuds skew
+well below 40Hz), which cleared the bar with a comfortable 96% margin. The implementation
+(`_clean_vocal`'s filter chain) was left exactly as specified -- the fix was entirely in the test's
+signal, not the shipped filter parameters.
+
+**Outstanding, not completed in this session -- needs a human**: this session had no access to a
+real microphone or a real (non-automated) browser, the same limitation this file has documented for
+every other real-time audio/mic feature (Phase 2's audio-sync check, Phase 3's live-pitch tuning,
+etc.). Two things remain, both requiring a human in a normal browser window with a working mic:
+1. **Measure the real `_RECORDING_OFFSET_SECONDS` value.** It currently ships at its untuned default,
+   `0.0` (a deliberate no-op, per the design spec's explicit instruction not to guess this constant)
+   -- meaning the start-offset correction code path is fully built, tested (against synthetic
+   offsets), and wired in, but doesn't yet correct anything in a real recording. Procedure: record a
+   take clapping once sharply on the song's first strong instrumental beat, extract the two raw
+   pre-mastering tracks (see `scripts/measure_recording_offset.py`'s docstring for the exact
+   temporary-debug-line procedure), run that script, and set the printed value.
+2. **Listen to a real mastered recording** to confirm the vocal is audibly cleaner/louder-but-not-
+   overwhelming and the take starts in sync, per the design spec's loudness targets (-16/-20 LUFS)
+   being a starting point pending exactly this kind of check -- same caveat this file attaches to
+   every other audio-quality claim.
+
+Until both are done, treat this feature as mechanically complete and fully test-covered, but not yet
+confirmed to sound right on a real voice.
