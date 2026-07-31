@@ -34,6 +34,13 @@ def main() -> int:
     parser.add_argument("instrumental_wav", type=Path)
     args = parser.parse_args()
 
+    if not args.vocal_wav.exists():
+        print(f"Input file not found: {args.vocal_wav}", file=sys.stderr)
+        return 1
+    if not args.instrumental_wav.exists():
+        print(f"Input file not found: {args.instrumental_wav}", file=sys.stderr)
+        return 1
+
     offset = measure_start_offset(args.vocal_wav, args.instrumental_wav)
     print(f"Measured offset: {offset:+.3f}s")
     print("(positive = vocal lags instrumental -- set _RECORDING_OFFSET_SECONDS in")

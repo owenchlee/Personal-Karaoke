@@ -1383,8 +1383,8 @@ is bad -- plus, raised mid-brainstorm, recordings sounded shifted from the start
 `MediaRecorder` tracks (previously mixed into one at record time) and uploads both to
 `POST /api/recordings/mp3` as a multipart form. A new `audio_pipeline/mastering.py::master_recording()`
 chains: transcode both tracks to wav -> correct a constant start-offset between them
-(`_correct_start_offset`, using a measured -- not guessed -- `_RECORDING_OFFSET_SECONDS` constant)
--> clean the vocal (highpass @90Hz, `afftdn` denoise, `acompressor`) -> two-pass `loudnorm` each
+(`_correct_start_offset`, using a to-be-measured (never guessed) `_RECORDING_OFFSET_SECONDS`
+constant, currently `0.0`) -> clean the vocal (highpass @90Hz, `afftdn` denoise, `acompressor`) -> two-pass `loudnorm` each
 track independently (vocal -16 LUFS, instrumental -20 LUFS -- narrowed from an initial -14/-20 split
 after feedback that the voice was too loud) -> mix (`amix`, `normalize=0` to preserve the loudnorm
 balance) -> `alimiter` so the vocal boost can't clip. `scripts/server.py`'s recording endpoint calls

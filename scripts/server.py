@@ -379,7 +379,7 @@ def _recording_path(filename: str) -> Path:
 
 
 @app.post("/api/recordings/mp3")
-async def render_recording_mp3(
+def render_recording_mp3(
     vocal: UploadFile = File(...),
     instrumental: UploadFile = File(...),
     song_id: str = Form("recording"),
@@ -390,9 +390,16 @@ async def render_recording_mp3(
     -- into an mp3, save it under RECORDINGS_DIR so it shows up in the "My
     recordings" list later, and return it directly so the browser can also
     download it immediately.
+
+    Deliberately a plain (not async) def: this does real, sequential ffmpeg
+    work (master_recording/transcode_to_mp3) that would otherwise block the
+    single-process event loop for the whole request, freezing every other
+    route (e.g. GET /api/jobs/{id} polling) -- FastAPI runs sync handlers in
+    its threadpool automatically, same fix already applied to _run_job's
+    background thread for process_song/download_audio.
     """
-    vocal_bytes = await vocal.read()
-    instrumental_bytes = await instrumental.read()
+    vocal_bytes = vocal.file.read()
+    instrumental_bytes = instrumental.file.read()
     if not vocal_bytes or not instrumental_bytes:
         raise HTTPException(status_code=400, detail="Empty recording")
 

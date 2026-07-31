@@ -150,6 +150,17 @@ export function useRecording({ audioRef, micStreamRef, songId }: UseRecordingOpt
     vocalRecorder.onstop = onEitherStop
     instrumentalRecorder.onstop = onEitherStop
 
+    // Per spec a MediaRecorder that errors should still fire `stop` afterwards, so this likely
+    // self-heals via onEitherStop above -- but if it doesn't, there'd be no safety net at all:
+    // status would stay stuck at 'recording' with no error message and no way forward but a page
+    // reload. This is that safety net.
+    const onEitherError = () => {
+      setErrorMessage('Recording failed — please try again.')
+      setStatus('error')
+    }
+    vocalRecorder.onerror = onEitherError
+    instrumentalRecorder.onerror = onEitherError
+
     vocalRecorderRef.current = vocalRecorder
     instrumentalRecorderRef.current = instrumentalRecorder
     // Started back-to-back (no `await` between the two calls) so both tracks begin capturing

@@ -1,9 +1,11 @@
 """Generic audio transcoding via ffmpeg.
 
-Currently used for one thing: turning the webm/opus blob the browser's
-MediaRecorder produces (for the "record your take" feature) into a real mp3
-for download. Kept separate from video_extraction.py, whose job is
-specifically video-container -> wav for the pipeline's own input step, not
+Used for two things: turning the webm/opus blob the browser's MediaRecorder
+produces (for the "record your take" feature) into a real mp3 for download
+(``transcode_to_mp3``), and transcoding a recorded take's tracks to a fixed-
+sample-rate wav (``transcode_to_wav``) for audio_pipeline/mastering.py's
+sample-accurate processing. Kept separate from video_extraction.py, whose job
+is specifically video-container -> wav for the pipeline's own input step, not
 arbitrary format conversion.
 """
 from pathlib import Path

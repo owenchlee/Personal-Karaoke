@@ -157,7 +157,7 @@ def _apply_loudnorm(input_path: Path, output_path: Path, target_i: float) -> Pat
                 linear="true",
                 print_format="summary",
             )
-            .output(str(output_path))
+            .output(str(output_path), ar=44100)
             .overwrite_output()
             .run(capture_stdout=True, capture_stderr=True)
         )

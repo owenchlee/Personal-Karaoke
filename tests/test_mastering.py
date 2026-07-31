@@ -12,6 +12,7 @@ import pytest
 import soundfile as sf
 
 from audio_pipeline.mastering import (
+    _LIMITER_CEILING,
     _apply_loudnorm,
     _clean_vocal,
     _correct_start_offset,
@@ -179,7 +180,7 @@ def test_master_recording_does_not_clip(tmp_path):
     mastered_path = master_recording(vocal_path, instrumental_path, tmp_path / "out")
 
     data, _ = sf.read(mastered_path)
-    assert np.max(np.abs(data)) <= 1.0
+    assert np.max(np.abs(data)) <= _LIMITER_CEILING + 0.01
 
 
 def test_master_recording_makes_the_vocal_more_prominent_relative_to_input(tmp_path):
