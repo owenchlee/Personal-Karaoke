@@ -1469,3 +1469,65 @@ tests (title parsing across real-world title shapes + structured-search/free-tex
 behavior); all 41 `test_lyrics_lookup.py` + `test_text_script.py` tests pass. Not yet re-verified
 end-to-end against a live lrclib lookup (needs network + a real download) -- the request-shaping is
 unit-tested against a mocked `requests.get`, same as the rest of this module's network path.
+
+## GPU was never actually being used, despite an NVIDIA GPU being present (recorded 2026-07-31)
+
+**Reported symptom**: "the NVIDIA GPU only turns on for gaming" -- read as a Windows
+hybrid-graphics/GPU-switching problem. That premise doesn't hold: the Windows per-app "Graphics
+performance preference" (`HKCU:\Software\Microsoft\DirectX\UserGpuPreferences`, `GpuPreference=2`)
+only controls which GPU renders a window's *display* output; it has no effect on which GPU a CUDA
+compute call uses. `nvidia-smi` confirmed the RTX 5050 Laptop GPU (driver 596.13, CUDA 13.2) was
+present, healthy, and not asleep the whole time.
+
+**Actual root cause**: `venv/Lib/site-packages/torch/version.py` showed `torch==2.13.0+cpu` --
+plain `pip install torch torchaudio` (no `--index-url`), exactly what this file's earlier "Why
+Python 3.11" section and `requirements.txt`'s old comment described as normal, installs PyPI's
+**CPU-only** wheel even on a machine with a working NVIDIA GPU. That old requirements.txt comment
+("the default wheel is CUDA-capable... falls back to CPU automatically otherwise") was wrong --
+confirmed directly, not assumed. `docs/superpowers/plans/2026-07-30-separation-model-choice.md`'s
+"this machine is CPU-only" conclusion (used to justify not exploring `bs_roformer`) was therefore
+also just an artifact of the CPU-only wheel, not a real hardware limit -- worth revisiting
+separately now that GPU acceleration actually works, though not done as part of this fix.
+
+**Fix**: reinstalled `torch==2.13.0`/`torchaudio==2.11.0` from
+`https://download.pytorch.org/whl/cu130` (same version numbers, CUDA-enabled build -- chosen
+because it's the only CUDA wheel index offering these exact versions, and CUDA 13.0 fully covers
+this GPU's Blackwell architecture). `audio_pipeline/device.py`'s `get_device()` needed no changes --
+it already did `torch.cuda.is_available()` correctly; it was simply always resolving to `"cpu"`
+because of the wheel, not the code. `torch.cuda.is_available()` now returns `True` and correctly
+names the RTX 5050.
+
+**Second, less obvious bug this surfaced**: switching `get_device()` to `"cuda"` broke
+`faster-whisper` (lyrics transcription) specifically, even though it fixed Demucs (`separation.py`)
+and the CTC forced-alignment model (`forced_alignment.py`) immediately. Root-caused via a minimal
+standalone repro script (not guessed): `WhisperModel(..., device="cuda")` constructs fine, but the
+first real `.transcribe()` call raises `RuntimeError: Library cublas64_12.dll is not found or
+cannot be loaded`. Reason: faster-whisper's backend, `ctranslate2`, links its own CUDA 12 cuBLAS at
+runtime, entirely independent of whatever CUDA version torch itself bundles (torch's cu130 build
+only ships `cublas64_13.dll`, privately, inside `torch/lib/` -- not visible to ctranslate2's
+separate native loader at all). This is why the test suite first appeared to *hang* rather than
+fail cleanly in an interactive run: reproduced the exact same error immediately in isolation once
+network/model-download red herrings were ruled out (the real 4GB of first-time model downloads for
+`large-v3` + the MMS forced-aligner masked the real symptom during the first couple of attempts).
+
+Fix: installed the `nvidia-cublas-cu12` pip package (ships just the missing DLL,
+`nvidia/cublas/bin/cublas64_12.dll`) and, in `audio_pipeline/device.py`, added its directory to
+both `os.add_dll_directory()` and `PATH` once at import time, guarded to `sys.platform == "win32"
+and torch.cuda.is_available()` so it's a no-op everywhere else. Verified the fix directly against
+the real `audio_pipeline.device.get_device()` + `WhisperModel` call path (not just the standalone
+repro) before trusting it. Added `nvidia-cublas-cu12; sys_platform == "win32"` to `requirements.txt`
+with the same explanation.
+
+**Verification**: full test suite -- `155 passed, 6 failed` (was previously untestable at all in
+this freshly-rebuilt venv, which also turned out to be missing every non-torch dependency; installed
+`requirements-lock.txt` plus `transformers`/`uroman`, which weren't in the lock file, to get a
+working baseline first). All 6 remaining failures are `FileNotFoundError` from `ffmpeg`/`ffprobe`
+not being installed on this machine at all (a separate, pre-existing, unrelated gap -- not
+installed as part of this fix, since it means adding system-wide software the user didn't ask for)
+-- zero failures relate to CUDA/torch. Full run took 54.6s total, not just individually-faster
+GPU stages, consistent with real acceleration. Ran the actual `scripts/separate_stems.py` CLI (not
+just a unit test) against a synthetic 30s clip: completed in 6.9s including the one-time `htdemucs`
+model download, with `get_device()` confirmed returning `"cuda"` throughout. No real full-length
+song was available in this reset environment to redo the exact NOTES.md Phase 0 timing comparison
+(79.9s CPU baseline) apples-to-apples -- that would need a real song plus `ffmpeg` installed, both
+out of scope here.

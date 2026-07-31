@@ -1,12 +1,17 @@
 # PyTorch for Demucs and (via faster-whisper/ctranslate2) lyrics
 # transcription. Installed separately (see README) so this file alone is not
 # enough to reproduce the env with a plain `pip install -r requirements.txt`
-# -- torch/torchaudio must be installed first via:
-#   pip install torch torchaudio
-# The default PyPI wheel is CUDA-capable when the machine has a compatible
-# NVIDIA driver and falls back to CPU automatically otherwise -- device
-# selection at runtime is handled by audio_pipeline/device.py, no separate
-# GPU/CPU install branch needed.
+# -- torch/torchaudio must be installed first via one of:
+#   - NVIDIA GPU present: pip install torch==2.13.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cu130
+#     (plain `pip install torch torchaudio`, with no --index-url, installs the
+#     CPU-only wheel from PyPI even on a machine with a working NVIDIA GPU --
+#     confirmed the hard way: this is not a fallback, it silently never uses
+#     the GPU. Match the cu1xx tag to the installed driver's CUDA version,
+#     e.g. via `nvidia-smi`.)
+#   - No NVIDIA GPU: pip install torch torchaudio (plain PyPI, CPU-only)
+# Device selection at runtime (which of the above is actually in effect) is
+# handled by audio_pipeline/device.py via torch.cuda.is_available(), no
+# separate code branch needed.
 demucs>=4.0.0,<5
 
 # basic-pitch requires TensorFlow as a hard base dependency on Windows/Linux
@@ -37,6 +42,17 @@ soundfile>=0.12.0
 # Local speech-to-text for lyrics transcription (word-level timestamps).
 # Downloads the "small" model from the Hugging Face Hub on first use.
 faster-whisper>=1.0.0
+
+# faster-whisper's backend (ctranslate2) links its own CUDA 12 cuBLAS at
+# runtime, independent of whatever CUDA version torch itself was installed
+# with (see the cu130 torch install above) -- on a GPU/Windows machine,
+# without this, the first real GPU transcription fails with "cublas64_12.dll
+# is not found or cannot be loaded" even though torch.cuda.is_available() is
+# True. This package just ships that one DLL; audio_pipeline/device.py wires
+# its directory onto the DLL search path/PATH automatically. Harmless no-op
+# on CPU-only or non-Windows setups (device.py only touches it when both
+# conditions apply, and this package installs fine there regardless).
+nvidia-cublas-cu12; sys_platform == "win32"
 
 # Downloads audio from a pasted link (e.g. YouTube) so the "load a song from
 # a link" flow can feed the existing file-based pipeline.
