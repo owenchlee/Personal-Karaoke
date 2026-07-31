@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch
 from audio_pipeline.lyrics_lookup import (
     _distribute_words,
     _parse_lrc,
+    _parse_title,
     _pick_best_synced_lyrics,
     _tokenize_line,
     _words_from_lrc,
@@ -120,6 +121,66 @@ def test_words_from_lrc_handles_square_bracket_backing_vocals_too():
 
     assert [w["word"] for w in words] == ["Real", "line"]
     assert background_ranges == []
+
+
+def test_parse_title_splits_artist_and_track_on_a_spaced_dash():
+    assert _parse_title("Adele - Hello") == ("Hello", "Adele")
+
+
+def test_parse_title_strips_promotional_bracket_tags():
+    assert _parse_title("Adele - Hello (Official Music Video) [4K]") == ("Hello", "Adele")
+    assert _parse_title("Photograph (Official Audio)") == ("Photograph", None)
+
+
+def test_parse_title_keeps_a_real_title_parenthetical():
+    # Only bracket groups that read as promotional noise are stripped -- a genuine subtitle stays.
+    assert _parse_title("Sign of the Times (Interlude)") == ("Sign of the Times (Interlude)", None)
+
+
+def test_parse_title_strips_a_featuring_credit():
+    assert _parse_title("DJ Khaled - Wild Thoughts (feat. Rihanna)") == ("Wild Thoughts", "DJ Khaled")
+    assert _parse_title("Song Name ft. Someone Else") == ("Song Name", None)
+
+
+def test_parse_title_leaves_an_intra_word_hyphen_alone():
+    # "Jay-Z" must not be split into artist "Jay" / track "Z" -- only a spaced dash separates fields.
+    assert _parse_title("Jay-Z - 99 Problems") == ("99 Problems", "Jay-Z")
+
+
+def test_parse_title_without_a_dash_has_no_artist():
+    assert _parse_title("Bohemian Rhapsody") == ("Bohemian Rhapsody", None)
+
+
+def test_parse_title_falls_back_to_the_raw_query_when_cleaning_empties_it():
+    # A title that is nothing but a bracketed noise tag shouldn't become an empty search string.
+    assert _parse_title("(Official Video)") == ("(Official Video)", None)
+
+
+def test_fetch_synced_lyrics_uses_structured_search_when_an_artist_is_present():
+    response = Mock()
+    response.json.return_value = [{"syncedLyrics": "[00:00.00]Hello world", "duration": 100}]
+    with patch("audio_pipeline.lyrics_lookup.requests.get", return_value=response) as mock_get:
+        fetch_synced_lyrics("Adele - Hello (Official Music Video)", duration_seconds=100)
+
+    _args, kwargs = mock_get.call_args
+    assert kwargs["params"] == {"track_name": "Hello", "artist_name": "Adele"}
+
+
+def test_fetch_synced_lyrics_falls_back_to_free_text_when_structured_search_misses():
+    empty = Mock()
+    empty.json.return_value = []
+    hit = Mock()
+    hit.json.return_value = [{"syncedLyrics": "[00:00.00]Hello world", "duration": 100}]
+    with patch(
+        "audio_pipeline.lyrics_lookup.requests.get", side_effect=[empty, hit]
+    ) as mock_get:
+        result = fetch_synced_lyrics("Adele - Hello", duration_seconds=100)
+
+    assert result is not None
+    assert mock_get.call_count == 2
+    # Second (fallback) attempt is a free-text query combining the cleaned artist and track.
+    _args, kwargs = mock_get.call_args_list[1]
+    assert kwargs["params"] == {"q": "Adele Hello"}
 
 
 def test_pick_best_synced_lyrics_prefers_closest_duration_match():

@@ -1430,3 +1430,42 @@ etc.). Two things remain, both requiring a human in a normal browser window with
 
 Until both are done, treat this feature as mechanically complete and fully test-covered, but not yet
 confirmed to sound right on a real voice.
+
+## Wrong / missing lyrics from a noisy lrclib query (recorded 2026-07-30)
+
+**Reported symptom**: lyrics "quite inaccurate and sometimes missing words." Traced to the *lookup
+query*, not the parsing/timing logic downstream of it. The job server passes the raw source title
+straight through as `lyrics_query` (`server.py` -> `process_song(..., lyrics_query=title)`), and
+`fetch_synced_lyrics` sent that verbatim as a free-text `q=` to lrclib's `/api/search`. A real
+source title is a YouTube video title, e.g. `"Adele - Hello (Official Music Video) [4K]"`,
+`"BLACKPINK - 'Pink Venom' M/V"`, `"Queen – Bohemian Rhapsody (Remastered 2011)"` -- carrying
+promotional noise ("(Official Music Video)", "[4K]", "(Remastered 2011)", "ft. ...") that a lyrics
+database's own track title never has. That noise makes lrclib either match the wrong release (a
+sped-up edit, a cover, a reaction upload with a similar title) or match nothing at all. **Both
+surface to the user as "the lyrics are wrong"**: a wrong match shows a different song's words, and a
+no-match silently falls back to the error-prone local Whisper transcription (the "missing words"
+half -- Whisper's long-form dropout, documented in `lyrics_extraction.py`, is exactly where words
+go missing).
+
+**Fix** (`lyrics_lookup.py`): clean and structure the title before the lookup instead of trusting it
+raw.
+- `_parse_title` strips promotional bracket groups (`_strip_noise_brackets` -- only a bracketed
+  group whose contents contain a known noise keyword like "official"/"video"/"remaster"/"4k"/"feat",
+  so a *genuine* title parenthetical like "(Interlude)" is preserved rather than mangled), strips a
+  trailing "feat./ft./featuring ..." credit, and splits "Artist - Title" on a *spaced* dash (so an
+  intra-word hyphen like "Jay-Z" is left intact). Handles ASCII and full-width/CJK bracket and dash
+  conventions for Cantonese uploads.
+- `fetch_synced_lyrics` then prefers lrclib's **structured** `track_name` + `artist_name` search
+  (far more precise than free text) whenever an artist was identified, and **falls back** to a
+  cleaned free-text query -- both when there was no "Artist - Title" split to make, and when the
+  precise search returns nothing usable (a slightly-off cleaned track/artist that free text still
+  matches loosely). Single request in the common case; the second (fallback) call only fires on a
+  structured-search miss, so the fast path is unchanged.
+
+This is a strict improvement to *which* release lrclib matches; the existing duration-closest pick
+and wrong-script rejection (`_pick_best_synced_lyrics`) still apply on top, and the downstream
+onset/tempo re-anchoring (`_align_synced_lyrics_to_audio`) is untouched. Verified with 9 new unit
+tests (title parsing across real-world title shapes + structured-search/free-text-fallback request
+behavior); all 41 `test_lyrics_lookup.py` + `test_text_script.py` tests pass. Not yet re-verified
+end-to-end against a live lrclib lookup (needs network + a real download) -- the request-shaping is
+unit-tested against a mocked `requests.get`, same as the rest of this module's network path.

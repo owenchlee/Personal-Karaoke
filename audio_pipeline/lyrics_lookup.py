@@ -23,6 +23,64 @@ _SEARCH_URL = "https://lrclib.net/api/search"
 _REQUEST_TIMEOUT_SECONDS = 10
 _FALLBACK_LAST_LINE_DURATION_SECONDS = 4.0
 
+# A song's ``lyrics_query`` is the raw source title (e.g. a YouTube video title like
+# "Adele - Hello (Official Music Video) [4K]"), which carries promotional noise a lyrics database's
+# own track title never has. Sent verbatim as a search query, that noise either matches the wrong
+# release (a sped-up edit, a cover, a reaction upload) or nothing at all -- both of which surface as
+# "the lyrics are wrong": a wrong match shows a different song's words, and no match silently falls
+# back to error-prone local transcription. Cleaning the title up front, and using lrclib's precise
+# structured (track_name + artist_name) search when an artist can be identified, matches the correct
+# release far more often. See _parse_title / fetch_synced_lyrics.
+
+# Only a bracketed group containing one of these words is stripped, so a real title parenthetical
+# ("Sign o' the Times", a genuine subtitle) is preserved while pure promotional tags are removed.
+_NOISE_KEYWORDS = (
+    "official", "video", "audio", "lyric", "visualizer", "visualiser", "vevo",
+    "hd", "hq", "4k", "8k", "uhd", "mv", "m/v", "remaster", "explicit", "clean version",
+    "full song", "with lyrics", "color coded", "colour coded", "karaoke", "instrumental",
+    "feat", "ft", "featuring", "prod", "cover",
+    # Common Cantonese/Chinese upload tags (official / lyrics / subtitles).
+    "官方", "歌詞", "歌词", "字幕", "純音樂", "高清",
+)
+
+# Bracketed groups in ASCII and full-width/CJK bracket conventions, non-nested.
+_BRACKET_GROUP_RE = re.compile(r"[(\[{（【〔][^)\]}）】〕]*[)\]}）】〕]")
+# "Artist - Title": a hyphen/dash flanked by spaces (so an intra-word hyphen like "Jay-Z" is left
+# alone). Full-width dash included for CJK titles.
+_DASH_SPLIT_RE = re.compile(r"\s+[-–—－]\s+")
+# A trailing "feat./ft./featuring ..." run that wasn't already inside brackets.
+_FEAT_RE = re.compile(r"\s+(?:feat|ft|featuring)\.?\s+.*$", re.IGNORECASE)
+_SURROUNDING_QUOTES = " \t\"'“”‘’「」『』"
+
+
+def _strip_noise_brackets(text: str) -> str:
+    def replace(match: "re.Match[str]") -> str:
+        inner = match.group(0)[1:-1].lower()
+        return " " if any(keyword in inner for keyword in _NOISE_KEYWORDS) else match.group(0)
+
+    stripped = _BRACKET_GROUP_RE.sub(replace, text)
+    return re.sub(r"\s+", " ", stripped).strip()
+
+
+def _strip_feat(text: str) -> str:
+    return _FEAT_RE.sub("", text).strip().strip(_SURROUNDING_QUOTES).strip()
+
+
+def _parse_title(raw_query: str) -> tuple[str, str | None]:
+    """Split a raw source title into ``(track, artist)`` for an lrclib lookup, stripping the
+    promotional noise a video title carries but a track title doesn't (see the module comment above
+    ``_NOISE_KEYWORDS``). ``artist`` is ``None`` when the title has no recognizable "Artist - Title"
+    split, in which case callers should fall back to a plain free-text search on ``track``.
+    """
+    cleaned = _strip_noise_brackets(raw_query)
+    parts = _DASH_SPLIT_RE.split(cleaned, maxsplit=1)
+    if len(parts) == 2 and _strip_feat(parts[0]) and _strip_feat(parts[1]):
+        return _strip_feat(parts[1]), _strip_feat(parts[0])
+    track = _strip_feat(cleaned)
+    # If cleaning stripped everything (a title that was pure noise), keep the original rather than
+    # searching for an empty string.
+    return (track or raw_query.strip()), None
+
 # lrclib only tells us when a line *starts*; naively treating "the next
 # line's start" as "this line's end" is fine back-to-back, but any pause
 # before that next line -- a held note trailing into silence, an
@@ -71,9 +129,37 @@ def fetch_synced_lyrics(
     -- callers should treat that as "try local transcription instead", not
     as an error.
     """
+    track, artist = _parse_title(query)
+
+    # A structured (track_name + artist_name) search is far more precise than free text, so try it
+    # first whenever the title yielded an artist -- then fall back to a cleaned free-text query, both
+    # when there was no artist to split out and when the precise search found nothing usable (a
+    # slightly-off cleaned track/artist that free text still matches loosely).
+    attempts: list[dict[str, str]] = []
+    if artist:
+        attempts.append({"track_name": track, "artist_name": artist})
+    attempts.append({"q": f"{artist} {track}" if artist else track})
+
+    for params in attempts:
+        results = _search(params)
+        if not results:
+            continue
+        synced = _pick_best_synced_lyrics(results, duration_seconds, query)
+        if not synced:
+            continue
+        words, background_ranges = _words_from_lrc(synced)
+        if words:
+            return words, background_ranges
+    return None
+
+
+def _search(params: dict[str, str]) -> list[dict] | None:
+    """Run one lrclib search and return its result list, or ``None`` if the request failed or
+    returned nothing usable -- so a caller can move on to the next (fallback) query.
+    """
     try:
         response = requests.get(
-            _SEARCH_URL, params={"q": query}, timeout=_REQUEST_TIMEOUT_SECONDS
+            _SEARCH_URL, params=params, timeout=_REQUEST_TIMEOUT_SECONDS
         )
         response.raise_for_status()
         results = response.json()
@@ -82,15 +168,7 @@ def fetch_synced_lyrics(
 
     if not isinstance(results, list) or not results:
         return None
-
-    synced = _pick_best_synced_lyrics(results, duration_seconds, query)
-    if not synced:
-        return None
-
-    words, background_ranges = _words_from_lrc(synced)
-    if not words:
-        return None
-    return words, background_ranges
+    return results
 
 
 def _words(text: str) -> set[str]:
