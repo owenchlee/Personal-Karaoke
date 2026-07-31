@@ -152,6 +152,7 @@ def _transcribe_chunked(
     sampling_rate: int,
     language: str,
     on_progress: Callable[[float], None] | None = None,
+    hotwords: str | None = None,
 ) -> list[dict]:
     """Transcribe ``audio`` in independent ~40s windows and stitch the
     results back together, rather than one long pass (see module-level
@@ -169,6 +170,12 @@ def _transcribe_chunked(
     ``on_progress``, if given, is called with a 0-1 fraction of audio
     transcribed so far -- this is what dominates a job's total wall time, so
     it's the main source of a real (not just guessed) overall progress number.
+
+    ``hotwords``, if given (e.g. the song's title/artist), is passed straight
+    through to faster-whisper on every window -- since each window is decoded
+    independently with ``condition_on_previous_text=False``, there's never a
+    previous-text prompt to bias decoding toward the song's own proper nouns
+    and vocabulary otherwise.
     """
     total_seconds = len(audio) / sampling_rate
     if total_seconds <= _CHUNK_SECONDS:
@@ -178,6 +185,7 @@ def _transcribe_chunked(
             word_timestamps=True,
             vad_filter=True,
             condition_on_previous_text=False,
+            hotwords=hotwords,
         )
         words = _flatten_words(list(segments))
         if on_progress:
@@ -200,6 +208,7 @@ def _transcribe_chunked(
             word_timestamps=True,
             vad_filter=True,
             condition_on_previous_text=False,
+            hotwords=hotwords,
         )
         chunk_words = _flatten_words(list(segments))
 
@@ -336,7 +345,12 @@ def _normalize_word(text: str) -> str:
 
 
 def _repair_energetic_gaps(
-    model: WhisperModel, audio, sampling_rate: int, language: str, words: list[dict]
+    model: WhisperModel,
+    audio,
+    sampling_rate: int,
+    language: str,
+    words: list[dict],
+    hotwords: str | None = None,
 ) -> list[dict]:
     """Recover words dropped into gaps that still have real singing energy.
 
@@ -362,7 +376,7 @@ def _repair_energetic_gaps(
             clip = audio[int(pad_start * sampling_rate) : int(pad_end * sampling_rate)]
             segments, _info = model.transcribe(
                 clip, language=language, word_timestamps=True, vad_filter=True,
-                condition_on_previous_text=False,
+                condition_on_previous_text=False, hotwords=hotwords,
             )
             for recovered in _flatten_words(list(segments)):
                 absolute_start = round(recovered["start"] + pad_start, 4)
@@ -426,6 +440,7 @@ def _repair_synced_lyrics_gaps(
     background_ranges: list[tuple[float, float]],
     vocal_stem_path: Path,
     language: str | None,
+    hotwords: str | None = None,
 ) -> list[dict]:
     """Fills real-singing gaps in lrclib-sourced ``words`` the same way ``_repair_energetic_gaps``
     already does for local transcription. Only loads Whisper at all if a cheap, model-free RMS scan
@@ -449,7 +464,8 @@ def _repair_synced_lyrics_gaps(
     )
     resolved_language = language or _detect_language(model, model_audio)
     return _repair_energetic_gaps(
-        model, model_audio, model.feature_extractor.sampling_rate, resolved_language, words
+        model, model_audio, model.feature_extractor.sampling_rate, resolved_language, words,
+        hotwords=hotwords,
     )
 
 
@@ -469,6 +485,13 @@ def extract_lyrics(
     ("en" or "yue"/Cantonese) when local transcription is needed --
     otherwise it's auto-detected from the audio, restricted to those same
     two languages (see ``_detect_language``).
+
+    Whenever Whisper actually runs (local transcription, or gap-repair on
+    top of a synced-lyrics match), ``lyrics_query`` is also passed through as
+    a hotword hint. Every window is decoded independently with
+    ``condition_on_previous_text=False`` (see ``_CHUNK_SECONDS``), so there's
+    no accumulated context to bias the decoder toward this song's own artist
+    name or unusual proper nouns without it.
 
     ``on_progress``, if given, is called with a 0-1 fraction of this stage's
     own progress -- 1.0 right away for the fast online-lookup path, or
@@ -497,7 +520,9 @@ def extract_lyrics(
             words, background_ranges = _force_align_synced_lyrics(
                 words, background_ranges, vocal_stem_path
             )
-            words = _repair_synced_lyrics_gaps(words, background_ranges, vocal_stem_path, language)
+            words = _repair_synced_lyrics_gaps(
+                words, background_ranges, vocal_stem_path, language, hotwords=lyrics_query
+            )
             if on_progress:
                 on_progress(1.0)
 
@@ -515,9 +540,12 @@ def extract_lyrics(
             (lambda fraction: on_progress(fraction * 0.95)) if on_progress else None
         )
         words = _transcribe_chunked(
-            model, audio, sampling_rate, language, on_progress=transcription_progress
+            model, audio, sampling_rate, language, on_progress=transcription_progress,
+            hotwords=lyrics_query,
         )
-        words = _repair_energetic_gaps(model, audio, sampling_rate, language, words)
+        words = _repair_energetic_gaps(
+            model, audio, sampling_rate, language, words, hotwords=lyrics_query
+        )
         if on_progress:
             on_progress(1.0)
 
