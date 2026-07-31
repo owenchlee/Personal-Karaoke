@@ -69,11 +69,14 @@ export function useMicPitch(audioRef: RefObject<HTMLAudioElement | null>) {
   const start = async () => {
     setStatus('requesting')
     try {
-      // Explicit constraints (not just `audio: true`) so the browser's acoustic echo canceller
-      // is guaranteed on -- without it, the instrumental playing out of the speakers bleeds back
-      // into the mic and gets read as pitch alongside (or instead of) the singer's voice.
+      // `echoCancellation` was previously forced on here so speaker bleed wouldn't get read as
+      // pitch -- but Chrome's AEC works by tapping the page's own output as its "far end"
+      // reference, and on this machine that tap was found to duck/silence the instrumental the
+      // moment the mic stream started (independent of Windows' own communications-ducking
+      // setting, which was already ruled out). Left off; `noiseSuppression`/`autoGainControl`
+      // only touch the mic's own input and don't need an output reference, so they're unaffected.
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true },
       })
       streamRef.current = stream
 

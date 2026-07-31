@@ -13,10 +13,8 @@ import soundfile as sf
 
 from audio_pipeline.mastering import (
     _LIMITER_CEILING,
-    _apply_loudnorm,
     _clean_vocal,
     _correct_start_offset,
-    _measure_loudness,
     master_recording,
     measure_start_offset,
 )
@@ -133,25 +131,6 @@ def test_clean_vocal_raises_a_clear_error_on_a_bogus_input(tmp_path):
 
     with pytest.raises(RuntimeError, match="ffmpeg failed to clean vocal"):
         _clean_vocal(bogus_path, tmp_path / "out")
-
-
-def test_apply_loudnorm_moves_measured_loudness_close_to_the_target(tmp_path):
-    quiet_path = tmp_path / "quiet.wav"
-    _write_tone(quiet_path, amplitude=0.02)
-
-    output_path = tmp_path / "normalized.wav"
-    _apply_loudnorm(quiet_path, output_path, target_i=-16)
-
-    after_stats = _measure_loudness(output_path, target_i=-16)
-    assert float(after_stats["input_i"]) == pytest.approx(-16, abs=1.0)
-
-
-def test_apply_loudnorm_raises_a_clear_error_on_a_bogus_input(tmp_path):
-    bogus_path = tmp_path / "not_audio.wav"
-    bogus_path.write_bytes(b"this is not real audio")
-
-    with pytest.raises(RuntimeError, match="ffmpeg failed to measure loudness"):
-        _apply_loudnorm(bogus_path, tmp_path / "out.wav", target_i=-16)
 
 
 def test_master_recording_produces_a_playable_wav(tmp_path):

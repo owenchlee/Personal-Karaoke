@@ -13,10 +13,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+from audio_pipeline.loudness import normalize_loudness
 from audio_pipeline.lyrics_extraction import extract_lyrics
 from audio_pipeline.melody_extraction import extract_melody
 from audio_pipeline.separation import separate_stems
 from audio_pipeline.video_extraction import extract_audio
+
+# Raw separator output (Demucs/BS-RoFormer) has no consistent loudness -- it's just
+# whatever amplitude the model happened to produce, which measured well below normal
+# listening level on real songs (e.g. one BS-RoFormer instrumental peaked at only ~25%
+# of full scale across its loudest 10s window). -14 LUFS matches common streaming
+# distribution loudness (Spotify/YouTube), appropriate here since the instrumental is
+# the only thing playing during gameplay -- unlike mastering.py's _INSTRUMENTAL_TARGET_LUFS
+# (-20), which is deliberately quieter so it sits behind a louder mixed-in vocal.
+_INSTRUMENTAL_PLAYBACK_TARGET_LUFS = -14
 
 _INSTRUMENTAL_FILENAME = "instrumental.wav"
 _VOCALS_FILENAME = "vocals.wav"
@@ -181,7 +191,10 @@ def process_song(
 ) -> SongAssets:
     """Process ``video_path`` end-to-end into cached instrumental audio and a
     note-event JSON, skipping reprocessing if a cached result already exists
-    for this song (unless ``force`` is set).
+    for this song (unless ``force`` is set). The published instrumental is
+    loudness-normalized (see ``_INSTRUMENTAL_PLAYBACK_TARGET_LUFS``) before
+    caching -- raw separator output otherwise plays back far quieter than a
+    normal mixed track.
 
     ``on_progress``, if given, is called with a stage name ("separating",
     "extracting_melody", "transcribing_lyrics") and a 0-1 fraction of that
@@ -231,7 +244,12 @@ def process_song(
     final_notes_path = song_cache_dir / _NOTES_FILENAME
     final_lyrics_path = song_cache_dir / _LYRICS_FILENAME
 
-    instrumental_path.replace(final_instrumental_path)
+    # Normalized (not just moved) -- the vocal stem is left at the separator's raw output
+    # level since melody/lyrics extraction's RMS thresholds were tuned against that, but
+    # nothing downstream depends on the instrumental's raw level, so it's safe to fix up
+    # here, right before publishing.
+    normalize_loudness(instrumental_path, final_instrumental_path, _INSTRUMENTAL_PLAYBACK_TARGET_LUFS)
+    instrumental_path.unlink()
     vocals_path.replace(final_vocals_path)
     melody.midi_path.replace(final_midi_path)
     melody.notes_path.replace(final_notes_path)

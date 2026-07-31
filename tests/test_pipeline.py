@@ -6,6 +6,7 @@ melody extraction are musically accurate (covered by their own module tests
 and by manual real-song validation, see NOTES.md).
 """
 import json
+from pathlib import Path
 from unittest.mock import patch
 
 import ffmpeg
@@ -175,6 +176,10 @@ def test_process_song_reports_stage_progress_via_on_progress_callback(tmp_path):
 
     progress_seen = []
 
+    def fake_normalize(input_path, output_path, target_i):
+        Path(output_path).write_bytes(Path(input_path).read_bytes())
+        return Path(output_path)
+
     with (
         patch("audio_pipeline.pipeline.extract_audio", return_value=extracted_wav),
         patch(
@@ -183,6 +188,7 @@ def test_process_song_reports_stage_progress_via_on_progress_callback(tmp_path):
         ),
         patch("audio_pipeline.pipeline.extract_melody", return_value=melody_result),
         patch("audio_pipeline.pipeline.extract_lyrics", return_value=lyrics_result),
+        patch("audio_pipeline.pipeline.normalize_loudness", side_effect=fake_normalize),
     ):
         process_song(
             fake_video_path, cache_dir=cache_dir, song_id="my-song",
@@ -215,11 +221,16 @@ def test_process_song_passes_the_requested_separation_model_through_and_records_
         "Lyrics", (), {"lyrics_path": lyrics_path, "background_vocal_ranges": []}
     )()
 
+    def fake_normalize(input_path, output_path, target_i):
+        Path(output_path).write_bytes(Path(input_path).read_bytes())
+        return Path(output_path)
+
     with (
         patch("audio_pipeline.pipeline.extract_audio", return_value=extracted_wav),
         patch("audio_pipeline.pipeline.separate_stems") as mock_separate_stems,
         patch("audio_pipeline.pipeline.extract_melody", return_value=melody_result),
         patch("audio_pipeline.pipeline.extract_lyrics", return_value=lyrics_result),
+        patch("audio_pipeline.pipeline.normalize_loudness", side_effect=fake_normalize),
     ):
         mock_separate_stems.return_value = (vocals_path, instrumental_path)
         process_song(
@@ -231,6 +242,59 @@ def test_process_song_passes_the_requested_separation_model_through_and_records_
 
     meta = json.loads((cache_dir / "my-song" / "meta.json").read_text())
     assert meta["separation_model"] == "htdemucs_ft"
+
+
+def test_process_song_normalizes_the_instrumental_before_publishing(tmp_path):
+    # Raw separator output has no consistent loudness (see audio_pipeline/pipeline.py's
+    # _INSTRUMENTAL_PLAYBACK_TARGET_LUFS docstring) -- this checks the published
+    # instrumental.wav actually goes through normalize_loudness rather than being a bare
+    # copy/rename of separate_stems's raw output.
+    cache_dir = tmp_path / "cache"
+    fake_video_path = tmp_path / "video.mp4"
+    fake_video_path.write_bytes(b"fake video data")
+
+    extracted_wav = tmp_path / "extracted.wav"
+    extracted_wav.write_bytes(b"fake wav data")
+    vocals_path = tmp_path / "vocals.wav"
+    vocals_path.write_bytes(b"fake vocals")
+    instrumental_path = tmp_path / "instrumental.wav"
+    instrumental_path.write_bytes(b"fake instrumental")
+    midi_path = tmp_path / "melody.mid"
+    midi_path.write_bytes(b"fake midi")
+    notes_path = tmp_path / "notes.json"
+    notes_path.write_text("[]")
+    lyrics_path = tmp_path / "lyrics.json"
+    lyrics_path.write_text("[]")
+
+    melody_result = type("Melody", (), {"midi_path": midi_path, "notes_path": notes_path})()
+    lyrics_result = type(
+        "Lyrics", (), {"lyrics_path": lyrics_path, "background_vocal_ranges": []}
+    )()
+
+    def fake_normalize(input_path, output_path, target_i):
+        Path(output_path).write_bytes(b"normalized instrumental")
+        return Path(output_path)
+
+    with (
+        patch("audio_pipeline.pipeline.extract_audio", return_value=extracted_wav),
+        patch(
+            "audio_pipeline.pipeline.separate_stems",
+            return_value=(vocals_path, instrumental_path),
+        ),
+        patch("audio_pipeline.pipeline.extract_melody", return_value=melody_result),
+        patch("audio_pipeline.pipeline.extract_lyrics", return_value=lyrics_result),
+        patch(
+            "audio_pipeline.pipeline.normalize_loudness", side_effect=fake_normalize
+        ) as mock_normalize,
+    ):
+        assets = process_song(fake_video_path, cache_dir=cache_dir, song_id="my-song")
+
+    final_instrumental_path = cache_dir / "my-song" / "instrumental.wav"
+    mock_normalize.assert_called_once_with(instrumental_path, final_instrumental_path, -14)
+    assert assets.instrumental_path == final_instrumental_path
+    assert assets.instrumental_path.read_bytes() == b"normalized instrumental"
+    # The raw separator output is cleaned up, not left behind alongside the published copy.
+    assert not instrumental_path.exists()
 
 
 def test_reprocess_melody_and_lyrics_reruns_extraction_from_the_cached_vocal_stem(tmp_path):

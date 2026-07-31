@@ -158,7 +158,7 @@ def _align(emissions: torch.Tensor, romanized_tokens: list[str], tokenizer) -> t
     ]
     blank_label = dictionary.get("<blank>", tokenizer.pad_token_id)
 
-    targets = torch.tensor([token_indices], dtype=torch.int32)
+    targets = torch.tensor([token_indices], dtype=torch.int32, device=emissions.device)
     path, _scores = torchaudio.functional.forced_align(
         emissions.unsqueeze(0).float(), targets, blank=blank_label
     )
