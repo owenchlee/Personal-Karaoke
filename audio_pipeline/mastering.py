@@ -29,12 +29,15 @@ from audio_pipeline.transcode import transcode_to_wav
 # see the "Recording start offset" section of
 # docs/superpowers/specs/2026-07-30-auto-balance-recording-design.md.
 #
-# 0.0 (this untuned default) is a no-op. Do NOT replace this with a guessed "typical mic
-# latency" number -- measure the real value with scripts/measure_recording_offset.py
-# against a real test recording (a sharp clap right on the song's first strong
-# instrumental beat) before relying on this correction. See that script's own docstring
-# for the exact procedure.
-_RECORDING_OFFSET_SECONDS = 0.0
+# Was left at the untuned 0.0 no-op default -- confirmed directly by a real user listening to a
+# real recording: the mic vocal consistently lands behind the instrumental by about half a second,
+# matching this module's own "Likely cause" analysis (mic capture warm-up latency vs. the
+# instrumental's near-zero-latency decoded-element source) and the design doc's "shifted from the
+# start, not a growing drift" diagnosis. 0.5 trims that much off the vocal track's leading edge so
+# it starts half a second earlier relative to the instrumental. If a future take still sounds off,
+# refine this with scripts/measure_recording_offset.py (a sharp clap on a known beat) rather than
+# re-guessing -- see that script's own docstring for the exact procedure.
+_RECORDING_OFFSET_SECONDS = 0.5
 
 
 def _correct_start_offset(

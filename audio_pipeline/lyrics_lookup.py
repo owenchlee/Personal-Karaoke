@@ -109,6 +109,22 @@ def _parse_title(raw_query: str) -> tuple[str, str | None]:
     # searching for an empty string.
     return (track or raw_query.strip()), None
 
+
+def clean_hotword_text(raw_query: str) -> str:
+    """Clean a raw source title down to just its track/artist text -- the same noise-stripping
+    ``fetch_synced_lyrics`` applies before searching lrclib (see ``_parse_title``), reused by
+    ``lyrics_extraction`` so Whisper's ``hotwords`` hint doesn't carry promotional tags either.
+    Passing the raw, noisy title straight through as a hotword primes the decoder with vocabulary
+    like "FLAC"/"LYRICS" that has no business being treated as something that might get sung --
+    and during a low-confidence stretch (silence, humming) Whisper can hallucinate exactly that
+    hint text back as if it were the lyrics (see ``lyrics_extraction._is_hotword_leakage`` for the
+    second-layer defense against the hint's *legitimate* remaining content, e.g. an artist's name,
+    leaking the same way).
+    """
+    track, artist = _parse_title(raw_query)
+    return f"{artist} {track}" if artist else track
+
+
 # lrclib only tells us when a line *starts*; naively treating "the next
 # line's start" as "this line's end" is fine back-to-back, but any pause
 # before that next line -- a held note trailing into silence, an

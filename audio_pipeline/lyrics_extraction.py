@@ -24,7 +24,7 @@ from faster_whisper.transcribe import Segment
 
 from audio_pipeline.device import get_device
 from audio_pipeline.forced_alignment import align_tokens
-from audio_pipeline.lyrics_lookup import fetch_synced_lyrics
+from audio_pipeline.lyrics_lookup import clean_hotword_text, fetch_synced_lyrics
 from audio_pipeline.text_script import has_unsupported_script
 
 # Benchmarked "small", "medium", and "large-v3" against the real test song
@@ -83,11 +83,51 @@ class LyricsResult:
     background_vocal_ranges: list[tuple[float, float]] = field(default_factory=list)
 
 
-def _flatten_words(segments: list[Segment]) -> list[dict]:
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _normalize_for_leak_check(text: str) -> str:
+    return _WHITESPACE_RE.sub("", text).lower()
+
+
+# Long enough that it can't be a coincidental single CJK particle or short common word shared
+# between real lyrics and the hotword text, short enough to still catch a leaked two-character
+# name/tag.
+_MIN_LEAK_MATCH_CHARS = 2
+
+
+def _is_hotword_leakage(segment_text: str, hotwords: str | None) -> bool:
+    """True when ``segment_text`` (an entire decoded segment, not just one word) looks like
+    Whisper echoing its own ``hotwords`` hint back verbatim rather than genuinely transcribing sung
+    audio. Observed directly on real Cantonese songs: a noisy title's promotional tags leaking into
+    a hallucinated first line during a wordless hum, and separately -- on a different song, after
+    the hotword text itself was already clean -- an artist's name (the hotword's other, legitimate
+    half) appearing as its own isolated "lyric" line where nothing was actually sung. `hotwords`
+    biases decoding toward exactly this text (see ``lyrics_lookup.clean_hotword_text``), so during a
+    low-confidence stretch (silence, humming, an instrumental gap) the decoder can settle on
+    reciting it back rather than admitting no words were said. This is a general, title-independent
+    defense -- unlike stripping specific noise keywords, it catches *any* verbatim echo of whatever
+    hint text this particular song was given, including an artist name that's legitimate hotword
+    content but not actually sung at this position. Whole-segment (not per-word) comparison, so a
+    hallucination split across several short "words" is still caught as one contiguous match against
+    the hint text.
+    """
+    if not hotwords:
+        return False
+    candidate = _normalize_for_leak_check(segment_text)
+    if len(candidate) < _MIN_LEAK_MATCH_CHARS:
+        return False
+    return candidate in _normalize_for_leak_check(hotwords)
+
+
+def _flatten_words(segments: list[Segment], hotwords: str | None = None) -> list[dict]:
     """Flatten basic-pitch-style segments into a single word list, tagging
     each word with a ``line`` index (its source segment's position among
     segments that actually produced words) so the frontend can group words
     back into displayable lines without re-deriving segmentation itself.
+
+    Drops an entire segment outright when it looks like hotword leakage
+    (see ``_is_hotword_leakage``) rather than keeping any of its words.
     """
     words = []
     line = 0
@@ -119,9 +159,13 @@ def _flatten_words(segments: list[Segment]) -> list[dict]:
                     "line": line,
                 }
             )
-        if line_words:
-            words.extend(line_words)
-            line += 1
+        if not line_words:
+            continue
+        segment_text = "".join(w["word"] for w in line_words)
+        if _is_hotword_leakage(segment_text, hotwords):
+            continue
+        words.extend(line_words)
+        line += 1
     return words
 
 
@@ -187,7 +231,7 @@ def _transcribe_chunked(
             condition_on_previous_text=False,
             hotwords=hotwords,
         )
-        words = _flatten_words(list(segments))
+        words = _flatten_words(list(segments), hotwords=hotwords)
         if on_progress:
             on_progress(1.0)
         return words
@@ -210,7 +254,7 @@ def _transcribe_chunked(
             condition_on_previous_text=False,
             hotwords=hotwords,
         )
-        chunk_words = _flatten_words(list(segments))
+        chunk_words = _flatten_words(list(segments), hotwords=hotwords)
 
         last_chunk_line = None
         for word in chunk_words:
@@ -378,7 +422,7 @@ def _repair_energetic_gaps(
                 clip, language=language, word_timestamps=True, vad_filter=True,
                 condition_on_previous_text=False, hotwords=hotwords,
             )
-            for recovered in _flatten_words(list(segments)):
+            for recovered in _flatten_words(list(segments), hotwords=hotwords):
                 absolute_start = round(recovered["start"] + pad_start, 4)
                 absolute_end = round(recovered["end"] + pad_start, 4)
                 if absolute_start < gap_start - 0.5 or absolute_start > gap_end + 0.5:
@@ -510,6 +554,12 @@ def extract_lyrics(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Cleaned once up front and reused for every Whisper call below -- passing the raw, noisy
+    # source title straight through as a hotword primes the decoder with vocabulary (promotional
+    # tags like "FLAC"/"LYRICS") that has no business being treated as something that might get
+    # sung (see lyrics_lookup.clean_hotword_text and _is_hotword_leakage above).
+    hotwords = clean_hotword_text(lyrics_query) if lyrics_query else None
+
     words = None
     background_ranges: list[tuple[float, float]] = []
     if lyrics_query:
@@ -521,7 +571,7 @@ def extract_lyrics(
                 words, background_ranges, vocal_stem_path
             )
             words = _repair_synced_lyrics_gaps(
-                words, background_ranges, vocal_stem_path, language, hotwords=lyrics_query
+                words, background_ranges, vocal_stem_path, language, hotwords=hotwords
             )
             if on_progress:
                 on_progress(1.0)
@@ -541,10 +591,10 @@ def extract_lyrics(
         )
         words = _transcribe_chunked(
             model, audio, sampling_rate, language, on_progress=transcription_progress,
-            hotwords=lyrics_query,
+            hotwords=hotwords,
         )
         words = _repair_energetic_gaps(
-            model, audio, sampling_rate, language, words, hotwords=lyrics_query
+            model, audio, sampling_rate, language, words, hotwords=hotwords
         )
         if on_progress:
             on_progress(1.0)
