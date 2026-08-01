@@ -45,7 +45,9 @@ export function useScoring({ audioRef, notes, latestSampleRef, active }: UseScor
       const sample = latestSampleRef.current
       const noteIndex = findActiveNoteIndex(notes, currentTime)
 
-      if (noteIndex !== -1 && sample && currentTime - sample.time <= STALE_SAMPLE_SECONDS) {
+      // Staleness is judged against `capturedAt`, not the calibration-corrected `time` -- see the
+      // note above `bufferLatencySeconds` in `useMicPitch.ts`.
+      if (noteIndex !== -1 && sample && currentTime - sample.capturedAt <= STALE_SAMPLE_SECONDS) {
         const isHit = isPitchMatch(sample.midi, notes[noteIndex].pitch_midi)
         accuraciesRef.current[noteIndex] = recordSample(accuraciesRef.current[noteIndex], isHit)
       }

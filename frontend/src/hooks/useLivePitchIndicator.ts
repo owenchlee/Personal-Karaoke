@@ -95,7 +95,10 @@ export function useLivePitchIndicator({ audioRef, notes, latestSampleRef }: UseL
       const activeNote = activeNoteIndex !== -1 ? notes[activeNoteIndex] : null
 
       const sample = latestSampleRef?.current ?? null
-      const sampleAge = sample ? currentTime - sample.time : Infinity
+      // Staleness is judged against `capturedAt` (when the reading actually happened), not the
+      // calibration-corrected `time` -- see the note above `bufferLatencySeconds` in
+      // `useMicPitch.ts` for why using `time` here made the pill vanish after calibration.
+      const sampleAge = sample ? currentTime - sample.capturedAt : Infinity
 
       if (sample && sampleAge <= MAX_SAMPLE_AGE_SECONDS) {
         // See NoteHighway's git history for the reasoning: fold toward the note actually being

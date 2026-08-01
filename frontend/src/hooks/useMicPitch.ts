@@ -8,6 +8,10 @@ export type MicStatus = 'idle' | 'requesting' | 'active' | 'denied'
 
 export interface PitchSample {
   time: number
+  /** The song-timeline moment this sample was actually read, *before* the calibration/buffer
+   * correction folded into `time` -- see the note above `bufferLatencySeconds` below for why
+   * staleness checks must use this instead of `time`. */
+  capturedAt: number
   hz: number
   midi: number
   clarity: number
@@ -96,7 +100,14 @@ export function useMicPitch(audioRef: RefObject<HTMLAudioElement | null>) {
       // detected sample ~40-50ms later than its true position in the song, biasing hit detection
       // right at note boundaries. Combined with the one-time mic/speaker round-trip latency
       // measured by the calibration screen (`useCalibration`/`game/calibration.ts`), this is the
-      // full correction applied before a sample is timestamped.
+      // full correction applied before a sample is timestamped. This correction is deliberately
+      // *not* used to judge how fresh/stale a sample is (see `PitchSample.capturedAt`, stamped
+      // with the uncorrected read time below) -- the calibration offset in particular can be large
+      // (it includes real human clap-reaction time from the calibration screen's click-and-clap
+      // test, not just system latency), and consumers that compared staleness against the
+      // corrected `time` instead ended up rejecting every sample as "too old" once a real-world
+      // calibration offset pushed it past their freshness window -- the live pitch pill silently
+      // stopped appearing at all after running calibration.
       const bufferLatencySeconds = analyser.fftSize / context.sampleRate
       calibrationOffsetSecondsRef.current = loadCalibrationOffsetSeconds()
 
@@ -111,6 +122,7 @@ export function useMicPitch(audioRef: RefObject<HTMLAudioElement | null>) {
             const songTimeNow = audioRef.current?.currentTime ?? 0
             latestSampleRef.current = {
               time: songTimeNow - bufferLatencySeconds - calibrationOffsetSecondsRef.current,
+              capturedAt: songTimeNow,
               hz,
               midi: hzToMidi(hz),
               clarity,
