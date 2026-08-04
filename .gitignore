@@ -21,6 +21,10 @@ scores/
 !tests/fixtures/**
 !frontend/public/*.wav
 
+# Public demo song assets (frontend/public/demo-cache/) are checked in on purpose, unlike the
+# personal library above -- only put songs here you have the rights to redistribute publicly.
+!frontend/public/demo-cache/**
+
 # Frontend
 frontend/node_modules/
 frontend/dist/

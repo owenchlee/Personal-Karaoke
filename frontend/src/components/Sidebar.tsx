@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { CloseIcon } from './icons'
+import { DEMO_MODE } from '../config'
 
 interface SidebarProps {
   open: boolean
@@ -7,7 +8,11 @@ interface SidebarProps {
   activeScreen: string | null
 }
 
-const NAV_LINKS: Array<{ href: string; screen: string | null; label: string }> = [
+// Screens that need a live job server (loading new songs, uploading recordings, persisted
+// scores) -- meaningless on the static demo build, so left out of its nav entirely.
+const DEMO_ONLY_SCREENS = new Set(['load', 'recordings', 'highscores'])
+
+const ALL_NAV_LINKS: Array<{ href: string; screen: string | null; label: string }> = [
   { href: '/', screen: null, label: 'Play' },
   { href: '/?screen=load', screen: 'load', label: 'Load a song' },
   { href: '/?screen=songs', screen: 'songs', label: 'Cached songs' },
@@ -15,6 +20,10 @@ const NAV_LINKS: Array<{ href: string; screen: string | null; label: string }> =
   { href: '/?screen=highscores', screen: 'highscores', label: 'High Scores' },
   { href: '/?screen=calibrate', screen: 'calibrate', label: 'Mic calibration' },
 ]
+
+const NAV_LINKS = DEMO_MODE
+  ? ALL_NAV_LINKS.filter((link) => !DEMO_ONLY_SCREENS.has(link.screen ?? ''))
+  : ALL_NAV_LINKS
 
 function Sidebar({ open, onClose, activeScreen }: SidebarProps) {
   useEffect(() => {

@@ -11,6 +11,7 @@ import { useMicPitch } from '../hooks/useMicPitch'
 import { useRecording } from '../hooks/useRecording'
 import { useScoring } from '../hooks/useScoring'
 import type { ScoreSubmissionResult } from '../types/score'
+import { CACHE_BASE } from '../config'
 
 function getSongId(): string | null {
   return new URLSearchParams(window.location.search).get('song')
@@ -55,7 +56,13 @@ function GameScreen() {
   const [recentNotes, setRecentNotes] = useState<RecentNoteStat[]>([])
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
-  const { status: micStatus, start: startMic, latestSampleRef, streamRef: micStreamRef } = useMicPitch(audioRef)
+  const {
+    status: micStatus,
+    start: startMic,
+    latestSampleRef,
+    streamRef: micStreamRef,
+    latencySecondsRef,
+  } = useMicPitch(audioRef)
   const { runningScore, getFinalScore, reset: resetScoring, accuraciesRef } = useScoring({
     audioRef,
     notes,
@@ -76,8 +83,8 @@ function GameScreen() {
     setLoadState('loading')
 
     Promise.all([
-      fetchJson<NoteEvent[]>(`/cache/${songId}/notes.json`),
-      fetchJson<LyricWord[]>(`/cache/${songId}/lyrics.json`),
+      fetchJson<NoteEvent[]>(`${CACHE_BASE}/${songId}/notes.json`),
+      fetchJson<LyricWord[]>(`${CACHE_BASE}/${songId}/lyrics.json`),
     ])
       .then(([notesData, lyricsData]) => {
         if (cancelled) return
@@ -247,7 +254,7 @@ function GameScreen() {
                 </label>
               </div>
             </div>
-            <audio ref={audioRef} src={`/cache/${songId}/instrumental.wav`} controls />
+            <audio ref={audioRef} src={`${CACHE_BASE}/${songId}/instrumental.wav`} controls />
             {micStatus === 'active' && (
               <div className="pitch-readout">
                 <span className="pitch-readout-item">
@@ -293,6 +300,7 @@ function GameScreen() {
               notes={notes}
               indicatorRef={indicatorRef}
               accuraciesRef={accuraciesRef}
+              latencySecondsRef={latencySecondsRef}
             />
           </div>
           {debug && (

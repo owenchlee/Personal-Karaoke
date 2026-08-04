@@ -1,9 +1,15 @@
 import { useEffect, useState } from 'react'
 import { formatProcessedAt, sortSongLibrary } from '../game/songLibrary'
 import { findBestScore } from '../game/scores'
+import { CACHE_BASE, DEMO_MODE } from '../config'
 import type { Song } from '../types/song'
 import type { ScoreRecord } from '../types/score'
 import { StarIcon, TrashIcon } from './icons'
+
+// The static demo build has no job server behind it, so the library is read from a manifest
+// baked into the build (see scripts/generate_demo_manifest.py) instead of the live API, and
+// star/delete -- which mutate state on a server that doesn't exist here -- are hidden.
+const SONGS_URL = DEMO_MODE ? `${CACHE_BASE}/manifest.json` : '/api/songs'
 
 interface SongLibraryProps {
   onSelect: (slug: string) => void
@@ -20,7 +26,7 @@ function SongLibrary({ onSelect, refreshKey }: SongLibraryProps) {
   useEffect(() => {
     let cancelled = false
 
-    fetch('/api/songs')
+    fetch(SONGS_URL)
       .then((response) => {
         if (!response.ok) throw new Error(`Failed to load songs: ${response.status}`)
         return response.json() as Promise<{ songs: Song[] }>
@@ -114,16 +120,18 @@ function SongLibrary({ onSelect, refreshKey }: SongLibraryProps) {
           const best = findBestScore(scores, song.slug)
           return (
             <li key={song.slug} className="song-library-row">
-              <button
-                type="button"
-                className={`song-library-star${song.starred ? ' song-library-star--active' : ''}`}
-                onClick={() => handleToggleStar(song)}
-                disabled={togglingStarSlug === song.slug}
-                aria-label={song.starred ? `Unstar ${song.title}` : `Star ${song.title}`}
-                title={song.starred ? `Unstar ${song.title}` : `Star ${song.title}`}
-              >
-                <StarIcon size={16} filled={song.starred} />
-              </button>
+              {!DEMO_MODE && (
+                <button
+                  type="button"
+                  className={`song-library-star${song.starred ? ' song-library-star--active' : ''}`}
+                  onClick={() => handleToggleStar(song)}
+                  disabled={togglingStarSlug === song.slug}
+                  aria-label={song.starred ? `Unstar ${song.title}` : `Star ${song.title}`}
+                  title={song.starred ? `Unstar ${song.title}` : `Star ${song.title}`}
+                >
+                  <StarIcon size={16} filled={song.starred} />
+                </button>
+              )}
               <button
                 type="button"
                 className="song-library-select"
@@ -133,16 +141,18 @@ function SongLibrary({ onSelect, refreshKey }: SongLibraryProps) {
                 {date && <span className="song-library-date">Added {date}</span>}
                 {best !== null && <span className="song-library-score">Best: {best}%</span>}
               </button>
-              <button
-                type="button"
-                className="song-library-delete"
-                onClick={() => handleDelete(song)}
-                disabled={deletingSlug === song.slug}
-                aria-label={`Delete ${song.title}`}
-                title={`Delete ${song.title}`}
-              >
-                <TrashIcon size={16} />
-              </button>
+              {!DEMO_MODE && (
+                <button
+                  type="button"
+                  className="song-library-delete"
+                  onClick={() => handleDelete(song)}
+                  disabled={deletingSlug === song.slug}
+                  aria-label={`Delete ${song.title}`}
+                  title={`Delete ${song.title}`}
+                >
+                  <TrashIcon size={16} />
+                </button>
+              )}
             </li>
           )
         })}

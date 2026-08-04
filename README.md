@@ -137,10 +137,39 @@ npm run test
 npx tsc --noEmit
 ```
 
+## Public demo (static site)
+
+The full app (loading songs from a link, recording, saved high scores) needs the Python job
+server running, so it's not something you can put on static hosting. But there's a `demo` build
+of the frontend that drops those backend-dependent screens and instead plays a small, curated set
+of pre-processed songs baked straight into the build — no server required at all, deployable free
+to GitHub Pages, Vercel, Netlify, or any static host.
+
+```bash
+# 1. Process a song you have the rights to publish (see "Processing a song from the command line"
+#    above), then publish it into the *demo* cache — not the regular one, see the note below:
+venv/Scripts/python.exe scripts/publish_song.py <song-slug> --public-dir frontend/public/demo-cache
+
+# 2. Regenerate the manifest the demo build reads its song list from:
+venv/Scripts/python.exe scripts/generate_demo_manifest.py
+
+# 3. Build the demo bundle:
+cd frontend
+npm run build:demo   # outputs frontend/dist, ready to deploy as-is
+```
+
+`frontend/public/cache/` (used by the normal dev/local build) is `.gitignored` on purpose — it
+fills up with whatever you've processed locally, usually commercial tracks, which aren't yours to
+redistribute publicly. `frontend/public/demo-cache/` is a separate, git-tracked directory carved
+out in `.gitignore` specifically for the public build — only put songs there you actually have the
+rights to publish (something original, Creative Commons-licensed, or your own recording).
+
 ## Known limitations
 
 - Lyrics are either a licensed lookup match (when lrclib has one) or a best-effort local
   transcription — expect occasional errors, especially on melisma or fast passages.
 - Melody extraction is tuned and validated against real songs but, like any automatic
   transcription, won't be perfect on every recording.
-- This is a personal, local-first project — there's no deployment target or hosted instance.
+- The full pipeline (loading a song from a link, recording, GPU-accelerated processing) is
+  personal/local-first and isn't meant to be exposed publicly. See "Public demo" above for the
+  static, backend-free subset that is safe to host.
