@@ -1,5 +1,9 @@
 # Personal Karaoke
 
+**[Try the live demo](https://owenchlee.github.io/Personal-Karaoke/)** — a small set of
+pre-processed songs, playable in the browser with no setup. See "Public demo" below for what's
+different from the full app.
+
 A Rock Band/Yousician-style karaoke pitch game that runs entirely on your own machine. Point it
 at a song (a local file or a link), and it separates vocals from instrumentals, extracts a
 reference melody and lyrics, then plays them back as a scrolling note highway with live
@@ -138,6 +142,10 @@ npx tsc --noEmit
 ```
 
 ## Public demo (static site)
+
+**Live at [owenchlee.github.io/Personal-Karaoke](https://owenchlee.github.io/Personal-Karaoke/).**
+Deployed automatically by [`.github/workflows/deploy-demo.yml`](.github/workflows/deploy-demo.yml)
+on every push to `main` that touches `frontend/`.
 
 The full app (loading songs from a link, recording, saved high scores) needs the Python job
 server running, so it's not something you can put on static hosting. But there's a `demo` build
