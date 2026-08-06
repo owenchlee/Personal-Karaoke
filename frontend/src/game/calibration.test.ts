@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import {
   clearCalibrationOffsetSeconds,
   computeCalibrationResult,
+  hasCalibrationOffset,
   loadCalibrationOffsetSeconds,
   pairBeatsToTaps,
   saveCalibrationOffsetSeconds,
@@ -112,6 +113,13 @@ describe('calibration offset storage', () => {
   it('clears back to the 0 default', () => {
     saveCalibrationOffsetSeconds(0.1)
     clearCalibrationOffsetSeconds()
+    expect(loadCalibrationOffsetSeconds()).toBe(0)
+  })
+
+  it('distinguishes "never calibrated" from a real result of exactly 0', () => {
+    expect(hasCalibrationOffset()).toBe(false)
+    saveCalibrationOffsetSeconds(0)
+    expect(hasCalibrationOffset()).toBe(true)
     expect(loadCalibrationOffsetSeconds()).toBe(0)
   })
 })

@@ -71,9 +71,13 @@ interface NoteHighwayProps {
   notes: NoteEvent[]
   indicatorRef?: RefObject<LiveIndicatorState>
   accuraciesRef?: RefObject<NoteAccuracy[]>
+  /** Buffer + calibration mic latency (`useMicPitch.ts`), held for the whole mic session -- see the
+   * note above `currentTime` in the draw loop below for why the highway itself needs this, not
+   * just scoring/the live pill. */
+  latencySecondsRef?: RefObject<number>
 }
 
-function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef }: NoteHighwayProps) {
+function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef, latencySecondsRef }: NoteHighwayProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)
   const renderedYRef = useRef<number | null>(null)
@@ -128,7 +132,13 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef }: NoteHighw
       dpr = window.devicePixelRatio || dpr
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-      const currentTime = audioRef.current?.currentTime ?? 0
+      // Scrolling notes off the raw audio clock would reach the playhead before the mic pipeline
+      // can possibly judge them -- pitch detection only ever produces a sample after buffer +
+      // calibration latency has elapsed (`useMicPitch.ts`), so a note that's already scrolled past
+      // the playhead by the time that judgment lands reads as "the highway moved too early." Holding
+      // the highway back by that same latency (rather than the raw audio position) keeps whatever
+      // bar sits at the playhead in sync with what's actually being judged right now.
+      const currentTime = (audioRef.current?.currentTime ?? 0) - (latencySecondsRef?.current ?? 0)
       const futureWindowSeconds = (cssWidth - PLAYHEAD_X) / DEFAULT_PX_PER_SECOND
 
       ctx.clearRect(0, 0, cssWidth, CANVAS_HEIGHT)
@@ -232,7 +242,7 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef }: NoteHighw
       resizeObserver.disconnect()
       darkModeQuery.removeEventListener('change', handleThemeChange)
     }
-  }, [audioRef, notes, indicatorRef, accuraciesRef])
+  }, [audioRef, notes, indicatorRef, accuraciesRef, latencySecondsRef])
 
   return <canvas ref={canvasRef} width={CANVAS_WIDTH_FALLBACK} height={CANVAS_HEIGHT} />
 }

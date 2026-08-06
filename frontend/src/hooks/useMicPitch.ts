@@ -57,6 +57,14 @@ export function useMicPitch(audioRef: RefObject<HTMLAudioElement | null>) {
   // Read once per mic session (not per-sample) -- a fresh calibration only takes effect the next
   // time the mic is (re)started, same as any other one-time setup value.
   const calibrationOffsetSecondsRef = useRef(0)
+  // Buffer + calibration latency combined (see `PitchSample.time` below) -- exposed as its own ref
+  // so a *visual* consumer (`NoteHighway`) can hold the note highway back by the same amount the
+  // pitch pipeline is already lagging by, instead of scrolling notes past the playhead on the raw
+  // audio clock while the mic/scoring side is still judging an earlier moment. Deliberately a
+  // constant-per-session value, not recomputed per sample the way `PitchSample.time` is -- shifting
+  // the whole highway only when a fresh sample happens to exist would make it visibly jump forward
+  // and back as singing starts/stops, instead of holding one steady offset for the whole session.
+  const latencySecondsRef = useRef(0)
 
   const stop = () => {
     if (rafRef.current !== null) {
@@ -67,6 +75,7 @@ export function useMicPitch(audioRef: RefObject<HTMLAudioElement | null>) {
     streamRef.current = null
     analyserRef.current = null
     latestSampleRef.current = null
+    latencySecondsRef.current = 0
     setStatus('idle')
   }
 
@@ -110,6 +119,7 @@ export function useMicPitch(audioRef: RefObject<HTMLAudioElement | null>) {
       // stopped appearing at all after running calibration.
       const bufferLatencySeconds = analyser.fftSize / context.sampleRate
       calibrationOffsetSecondsRef.current = loadCalibrationOffsetSeconds()
+      latencySecondsRef.current = bufferLatencySeconds + calibrationOffsetSecondsRef.current
 
       setStatus('active')
 
@@ -139,5 +149,5 @@ export function useMicPitch(audioRef: RefObject<HTMLAudioElement | null>) {
 
   useEffect(() => stop, [])
 
-  return { status, start, stop, latestSampleRef, streamRef }
+  return { status, start, stop, latestSampleRef, streamRef, latencySecondsRef }
 }

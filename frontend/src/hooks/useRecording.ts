@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
+import { hasCalibrationOffset, loadCalibrationOffsetSeconds } from '../game/calibration'
 import { parseContentDispositionFilename } from '../game/recordings'
 
 export type RecordingStatus = 'idle' | 'recording' | 'processing' | 'done' | 'error'
@@ -75,6 +76,15 @@ export function useRecording({ audioRef, micStreamRef, songId }: UseRecordingOpt
       formData.append('vocal', vocalBlob, 'vocal.webm')
       formData.append('instrumental', instrumentalBlob, 'instrumental.webm')
       formData.append('song_id', songId)
+      // Player's own measured mic latency (frontend/src/game/calibration.ts's "clap along to a
+      // click track" flow, re-run whenever they switch mics) -- lets the server align this take's
+      // vocal/instrumental tracks against real per-device latency instead of one fixed guess (see
+      // audio_pipeline/mastering.py's _RECORDING_OFFSET_SECONDS docstring). Omitted entirely for a
+      // player who hasn't calibrated yet, so the server falls back to its own default rather than
+      // receiving an unearned 0.
+      if (hasCalibrationOffset()) {
+        formData.append('calibration_offset_seconds', String(loadCalibrationOffsetSeconds()))
+      }
 
       const response = await fetch('/api/recordings/mp3', { method: 'POST', body: formData })
       if (!response.ok) throw new Error(`Server responded ${response.status}`)

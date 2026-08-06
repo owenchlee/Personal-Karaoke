@@ -91,14 +91,23 @@ export function useLivePitchIndicator({ audioRef, notes, latestSampleRef }: UseL
 
     const tick = (timestamp: number) => {
       const currentTime = audioRef.current?.currentTime ?? 0
-      const activeNoteIndex = findActiveNoteIndex(notes, currentTime)
-      const activeNote = activeNoteIndex !== -1 ? notes[activeNoteIndex] : null
 
       const sample = latestSampleRef?.current ?? null
       // Staleness is judged against `capturedAt` (when the reading actually happened), not the
       // calibration-corrected `time` -- see the note above `bufferLatencySeconds` in
       // `useMicPitch.ts` for why using `time` here made the pill vanish after calibration.
       const sampleAge = sample ? currentTime - sample.capturedAt : Infinity
+
+      // Which note a sample gets judged against uses `sample.time` (currentTime, minus detection-
+      // buffer + mic/calibration latency -- see `useMicPitch.ts`), not raw `currentTime`: a sample
+      // is only ever available *after* that latency has elapsed, so by the time it arrives, the
+      // note active "right now" has often already scrolled past the moment the singer actually
+      // produced it. Comparing against `sample.time` instead judges it against the note that was
+      // really active when they sang it -- matching what `useScoring` does. Falls back to
+      // `currentTime` when there's no fresh sample to anchor against.
+      const noteLookupTime = sample && sampleAge <= MAX_SAMPLE_AGE_SECONDS ? sample.time : currentTime
+      const activeNoteIndex = findActiveNoteIndex(notes, noteLookupTime)
+      const activeNote = activeNoteIndex !== -1 ? notes[activeNoteIndex] : null
 
       if (sample && sampleAge <= MAX_SAMPLE_AGE_SECONDS) {
         // See NoteHighway's git history for the reasoning: fold toward the note actually being

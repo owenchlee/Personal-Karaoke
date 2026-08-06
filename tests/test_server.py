@@ -558,8 +558,8 @@ def test_render_recording_mp3_masters_both_uploaded_tracks_and_saves_the_take(tm
 
     calls = []
 
-    def fake_master_recording(vocal_path, instrumental_path, output_dir):
-        calls.append((Path(vocal_path).read_bytes(), Path(instrumental_path).read_bytes()))
+    def fake_master_recording(vocal_path, instrumental_path, output_dir, calibration_offset_seconds=None):
+        calls.append((Path(vocal_path).read_bytes(), Path(instrumental_path).read_bytes(), calibration_offset_seconds))
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         mastered_path = output_dir / "mastered.wav"
@@ -581,10 +581,40 @@ def test_render_recording_mp3_masters_both_uploaded_tracks_and_saves_the_take(tm
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "audio/mpeg"
-    assert calls == [(b"fake vocal bytes", b"fake instrumental bytes")]
+    assert calls == [(b"fake vocal bytes", b"fake instrumental bytes", None)]
 
     saved = list(recordings_dir.glob("my-song__*.mp3"))
     assert len(saved) == 1
+
+
+def test_render_recording_mp3_forwards_the_browser_s_calibration_offset(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "RECORDINGS_DIR", tmp_path / "recordings")
+
+    calls = []
+
+    def fake_master_recording(vocal_path, instrumental_path, output_dir, calibration_offset_seconds=None):
+        calls.append(calibration_offset_seconds)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        mastered_path = output_dir / "mastered.wav"
+        t = np.linspace(0, 0.5, 22050, endpoint=False)
+        tone = (0.2 * np.sin(2 * np.pi * 440.0 * t)).astype(np.float32)
+        sf.write(mastered_path, tone, 44100)
+        return mastered_path
+
+    monkeypatch.setattr(server, "master_recording", fake_master_recording)
+
+    response = client.post(
+        "/api/recordings/mp3",
+        files={
+            "vocal": ("vocal.webm", b"fake vocal bytes", "audio/webm"),
+            "instrumental": ("instrumental.webm", b"fake instrumental bytes", "audio/webm"),
+        },
+        data={"song_id": "My Song", "calibration_offset_seconds": "0.318"},
+    )
+
+    assert response.status_code == 200
+    assert calls == [pytest.approx(0.318)]
 
 
 def test_render_recording_mp3_rejects_an_empty_track(tmp_path, monkeypatch):
@@ -605,7 +635,7 @@ def test_render_recording_mp3_rejects_an_empty_track(tmp_path, monkeypatch):
 def test_render_recording_mp3_returns_500_when_mastering_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "RECORDINGS_DIR", tmp_path / "recordings")
 
-    def fake_master_recording(vocal_path, instrumental_path, output_dir):
+    def fake_master_recording(vocal_path, instrumental_path, output_dir, calibration_offset_seconds=None):
         raise RuntimeError("ffmpeg failed to clean vocal: boom")
 
     monkeypatch.setattr(server, "master_recording", fake_master_recording)

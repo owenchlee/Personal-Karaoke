@@ -29,15 +29,29 @@ from audio_pipeline.transcode import transcode_to_wav
 # see the "Recording start offset" section of
 # docs/superpowers/specs/2026-07-30-auto-balance-recording-design.md.
 #
-# Was left at the untuned 0.0 no-op default -- confirmed directly by a real user listening to a
-# real recording: the mic vocal consistently lands behind the instrumental by about half a second,
-# matching this module's own "Likely cause" analysis (mic capture warm-up latency vs. the
-# instrumental's near-zero-latency decoded-element source) and the design doc's "shifted from the
-# start, not a growing drift" diagnosis. 0.5 trims that much off the vocal track's leading edge so
-# it starts half a second earlier relative to the instrumental. If a future take still sounds off,
-# refine this with scripts/measure_recording_offset.py (a sharp clap on a known beat) rather than
-# re-guessing -- see that script's own docstring for the exact procedure.
-_RECORDING_OFFSET_SECONDS = 0.5
+# This single global guess (tuned 0.0 -> 0.5 -> 0.2 across two real-user listening tests) never
+# held across different mics/audio interfaces, each with their own real hardware capture latency.
+# The fix isn't a better guess -- it's not guessing at all: `master_recording` now measures the
+# actual offset directly from each take's own two tracks (see `_estimate_start_offset`), which
+# adapts automatically to whatever mic was used with no calibration step required. An earlier
+# version of this fix instead forwarded the frontend's click-track mic-latency calibration
+# (`frontend/src/game/calibration.ts`) as a per-request override, reasoning it was already
+# measuring "this same" latency per-device -- but that calibration measures speaker-output +
+# *human clap-reaction time* + mic-input latency (see `useCalibration.ts`'s docstring), and the
+# reaction-time component doesn't apply here at all: both tracks in a raw two-track recording are
+# captured directly (mic buffer / decoded <audio> element), with no human reacting to a cue in the
+# loop. Reusing that number systematically overcorrected -- confirmed by a real recording still
+# sounding too-early-shifted after wiring it through. `master_recording` still accepts that value
+# as `recording_offset_seconds`, now demoted to a fallback for when the direct per-take measurement
+# can't get a confident read (e.g. a near-silent take). This constant is the last-resort fallback
+# below that: a request with no confident measurement *and* no calibration on file yet.
+_RECORDING_OFFSET_SECONDS = 0.2
+
+# How far in either direction _estimate_start_offset will look for the real lag. Generous relative
+# to any plausible mic/interface hardware latency (which runs tens to a couple hundred ms) so it
+# comfortably covers that case, without being so wide that a spurious rhythmic coincidence far from
+# the true lag can outscore it.
+_MAX_AUTO_OFFSET_SECONDS = 1.5
 
 
 def _correct_start_offset(
@@ -72,8 +86,65 @@ def _correct_start_offset(
     return aligned_vocal_path, aligned_instrumental_path
 
 
+def _estimate_start_offset(
+    vocal_path: Path, instrumental_path: Path, max_offset_seconds: float = _MAX_AUTO_OFFSET_SECONDS
+) -> float | None:
+    """Measures the real start offset between *this specific take's* vocal and instrumental
+    tracks directly, by cross-correlating their onset-strength envelopes over a window of
+    candidate lags. Works with no clap, no calibration step, and no audible instrumental bleed in
+    the vocal track (e.g. a singer on headphones) -- it doesn't need the two tracks to share actual
+    audio content, only correlated *rhythm*: a singer's vocal onsets track the instrumental's beat
+    (that's what singing along means), just picked up through a differently-delayed capture path.
+    That correlation peak is exactly the real lag between the two tracks, measured fresh for every
+    take on whatever mic/interface was actually used.
+
+    Returns ``None`` rather than a low-confidence guess when the best-scoring lag doesn't stand out
+    clearly from the rest of the window (e.g. a near-silent take with no real onset structure to
+    correlate) -- callers should fall back to a fixed value instead of trusting noise.
+    """
+    import librosa  # local import: only this offset-measurement path needs it
+    import numpy as np
+
+    y_vocal, sr = librosa.load(str(vocal_path), sr=None, mono=True)
+    y_instrumental, _ = librosa.load(str(instrumental_path), sr=sr, mono=True)
+
+    hop_length = 512
+    onset_vocal = librosa.onset.onset_strength(y=y_vocal, sr=sr, hop_length=hop_length)
+    onset_instrumental = librosa.onset.onset_strength(y=y_instrumental, sr=sr, hop_length=hop_length)
+
+    if not np.any(onset_vocal) or not np.any(onset_instrumental):
+        return None
+
+    max_lag_frames = max(1, int(round(max_offset_seconds * sr / hop_length)))
+    lags = range(-max_lag_frames, max_lag_frames + 1)
+    scores = np.empty(len(lags))
+
+    for i, lag in enumerate(lags):
+        # Positive lag = the vocal's onsets came `lag` frames after the instrumental's (the vocal
+        # lags), matching this module's offset sign convention -- slide the vocal envelope back by
+        # `lag` frames before scoring how well it lines up with the instrumental's.
+        if lag >= 0:
+            a, b = onset_vocal[lag:], onset_instrumental
+        else:
+            a, b = onset_vocal, onset_instrumental[-lag:]
+        n = min(len(a), len(b))
+        scores[i] = float(np.dot(a[:n], b[:n])) if n > 0 else 0.0
+
+    best_index = int(np.argmax(scores))
+    peak = scores[best_index]
+    mean_abs = float(np.mean(np.abs(scores)))
+    # A real, sharp lag stands well above the rest of the window; a near-silent or unrelated take
+    # produces a flat, noisy score curve with no such standout -- this threshold is the difference.
+    if peak <= 0 or mean_abs == 0 or peak < 3 * mean_abs:
+        return None
+
+    return float(list(lags)[best_index] * hop_length / sr)
+
+
 _HIGHPASS_HZ = 90
 
+
+_DENOISE_STRENGTH_DB = 6
 
 def _clean_vocal(input_path: Path, output_dir: Path) -> Path:
     """Highpass (removes rumble/handling noise below ``_HIGHPASS_HZ``), denoise
@@ -82,6 +153,16 @@ def _clean_vocal(input_path: Path, output_dir: Path) -> Path:
     (``acompressor``, evens out quiet/loud parts) the vocal track. Loudness
     balancing against the instrumental happens separately (see
     ``_apply_loudnorm``, added in a later task).
+
+    ``afftdn`` runs well below its default strength (``nr=12``) and with noise tracking on
+    (``tn=1``): the mic stream recorded by useRecording.ts already has the browser's own
+    real-time ``noiseSuppression``/``autoGainControl`` applied (see useMicPitch.ts/
+    useRecording.ts), so this is a light second pass, not the only line of defense (see this
+    feature's design spec) -- running it at full static strength on top of already-denoised audio
+    was stacking two denoise passes and smearing/muffling the vocal (reported as the recording
+    sounding "blurry"/"unclear"). ``tn=1`` continuously re-estimates the noise profile instead of
+    assuming one fixed profile for the whole take, which holds up better against a real take's
+    varying room tone/silence-vs-voicing than the static default.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -91,7 +172,7 @@ def _clean_vocal(input_path: Path, output_dir: Path) -> Path:
         (
             ffmpeg.input(str(input_path))
             .filter("highpass", f=_HIGHPASS_HZ)
-            .filter("afftdn")
+            .filter("afftdn", nr=_DENOISE_STRENGTH_DB, tn=1)
             .filter("acompressor")
             .output(str(output_path))
             .overwrite_output()
@@ -104,8 +185,10 @@ def _clean_vocal(input_path: Path, output_dir: Path) -> Path:
     return output_path
 
 
-_VOCAL_TARGET_LUFS = -16
-_INSTRUMENTAL_TARGET_LUFS = -20
+_VOCAL_TARGET_LUFS = -14
+# Vocal raised from -16 -- feedback was the voice needed to sit louder in the mix. Widens the gap
+# over the instrumental (still -18, unchanged) from 2 LU to 4 LU.
+_INSTRUMENTAL_TARGET_LUFS = -18
 _LIMITER_CEILING = 0.95
 
 
@@ -137,12 +220,23 @@ def _mix_and_limit(vocal_path: Path, instrumental_path: Path, output_path: Path)
     return output_path
 
 
-def master_recording(vocal_path: str | Path, instrumental_path: str | Path, output_dir: str | Path) -> Path:
+def master_recording(
+    vocal_path: str | Path,
+    instrumental_path: str | Path,
+    output_dir: str | Path,
+    recording_offset_seconds: float | None = None,
+) -> Path:
     """Auto-balance and clean up a player's recorded take -- the single entry
     point scripts/server.py calls. ``vocal_path``/``instrumental_path`` are
     the two separately-recorded tracks from useRecording.ts, in any
-    container/codec ffmpeg can read (in practice, webm/opus). Returns the
-    path to the mastered wav (start-aligned, vocal cleaned and balanced
+    container/codec ffmpeg can read (in practice, webm/opus).
+    The actual start alignment is measured directly from this take's own two tracks (see
+    ``_estimate_start_offset``) -- no guess or borrowed calibration figure needed, since it adapts
+    to whatever mic/interface was really used. ``recording_offset_seconds``, when given, is used
+    only as a fallback for when that direct measurement isn't confident (e.g. a near-silent take)
+    -- in practice the requesting browser's own mic-latency calibration (see
+    ``_RECORDING_OFFSET_SECONDS``'s docstring). ``None`` falls back past that to the module
+    constant. Returns the path to the mastered wav (start-aligned, vocal cleaned and balanced
     louder than the instrumental, mixed, limited against clipping).
     """
     output_dir = Path(output_dir)
@@ -151,8 +245,12 @@ def master_recording(vocal_path: str | Path, instrumental_path: str | Path, outp
     vocal_wav = transcode_to_wav(vocal_path, output_dir)
     instrumental_wav = transcode_to_wav(instrumental_path, output_dir)
 
+    offset_seconds = _estimate_start_offset(vocal_wav, instrumental_wav)
+    if offset_seconds is None:
+        offset_seconds = _RECORDING_OFFSET_SECONDS if recording_offset_seconds is None else recording_offset_seconds
+
     aligned_vocal_path, aligned_instrumental_path = _correct_start_offset(
-        vocal_wav, instrumental_wav, output_dir
+        vocal_wav, instrumental_wav, output_dir, offset_seconds
     )
     cleaned_vocal_path = _clean_vocal(aligned_vocal_path, output_dir)
     normalized_vocal_path = _apply_loudnorm(

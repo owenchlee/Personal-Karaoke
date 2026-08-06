@@ -15,6 +15,7 @@ from audio_pipeline.mastering import (
     _LIMITER_CEILING,
     _clean_vocal,
     _correct_start_offset,
+    _estimate_start_offset,
     master_recording,
     measure_start_offset,
 )
@@ -24,6 +25,20 @@ def _write_tone(path, duration_s=3.0, samplerate=44100, freq_hz=220.0, amplitude
     t = np.linspace(0, duration_s, int(duration_s * samplerate), endpoint=False)
     tone = amplitude * np.sin(2 * np.pi * freq_hz * t)
     sf.write(path, tone.astype(np.float32), samplerate)
+
+
+def _write_click_train(path, samplerate, click_times, duration_s, freq_hz=1000.0, click_duration_s=0.03, amplitude=0.5):
+    total_samples = int(duration_s * samplerate)
+    audio = np.zeros(total_samples, dtype=np.float32)
+    click_samples = int(click_duration_s * samplerate)
+    t_click = np.linspace(0, click_duration_s, click_samples, endpoint=False)
+    click_wave = (amplitude * np.sin(2 * np.pi * freq_hz * t_click)).astype(np.float32)
+    for click_time in click_times:
+        start = int(click_time * samplerate)
+        end = min(start + click_samples, total_samples)
+        if start < total_samples:
+            audio[start:end] += click_wave[: end - start]
+    sf.write(path, audio, samplerate)
 
 
 def test_correct_start_offset_trims_the_lagging_vocal_track(tmp_path):
@@ -148,6 +163,81 @@ def test_master_recording_produces_a_playable_wav(tmp_path):
     assert not np.isnan(data).any()
     duration_s = data.shape[0] / samplerate
     assert duration_s == pytest.approx(3.0, abs=0.5)
+
+
+def test_estimate_start_offset_recovers_a_real_lag_from_correlated_onset_structure(tmp_path):
+    # The "vocal" onsets track the same beat as the "instrumental" (that's what singing along
+    # means), just picked up `lag_seconds` late -- simulating real mic/interface capture latency,
+    # with no audio content shared between the two tracks at all.
+    samplerate = 44100
+    duration_s = 6.0
+    lag_seconds = 0.18
+    click_times = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+    instrumental_path = tmp_path / "instrumental.wav"
+    vocal_path = tmp_path / "vocal.wav"
+    _write_click_train(instrumental_path, samplerate, click_times, duration_s, freq_hz=1000.0)
+    _write_click_train(vocal_path, samplerate, [t + lag_seconds for t in click_times], duration_s, freq_hz=600.0)
+
+    offset = _estimate_start_offset(vocal_path, instrumental_path)
+    assert offset == pytest.approx(lag_seconds, abs=0.03)
+
+
+def test_estimate_start_offset_declines_to_guess_on_a_take_with_no_correlated_structure(tmp_path):
+    samplerate = 44100
+    rng = np.random.default_rng(0)
+    vocal_path = tmp_path / "vocal.wav"
+    instrumental_path = tmp_path / "instrumental.wav"
+    sf.write(vocal_path, (0.02 * rng.standard_normal(int(3.0 * samplerate))).astype(np.float32), samplerate)
+    _write_tone(instrumental_path, duration_s=2.0, samplerate=samplerate, freq_hz=220.0, amplitude=0.2)
+
+    assert _estimate_start_offset(vocal_path, instrumental_path) is None
+
+
+def test_master_recording_prefers_the_directly_measured_offset_over_a_given_override(tmp_path):
+    # Correlated click trains give `_estimate_start_offset` a confident, measurable real lag --
+    # that measurement should drive alignment even when a (here, wrong) override is also supplied.
+    samplerate = 44100
+    duration_s = 6.0
+    lag_seconds = 0.18
+    click_times = [1.0, 2.0, 3.0, 4.0, 5.0]
+
+    instrumental_path = tmp_path / "instrumental.wav"
+    vocal_path = tmp_path / "vocal.wav"
+    _write_click_train(instrumental_path, samplerate, click_times, duration_s, freq_hz=1000.0)
+    _write_click_train(vocal_path, samplerate, [t + lag_seconds for t in click_times], duration_s, freq_hz=600.0)
+
+    # A deliberately-wrong override (10x the real lag) -- if this drove the result, the aligned
+    # vocal's first click would land far from the instrumental's; the measured offset instead
+    # aligns them correctly regardless.
+    mastered_path = master_recording(
+        vocal_path, instrumental_path, tmp_path / "out", recording_offset_seconds=lag_seconds * 10
+    )
+    assert mastered_path.exists()
+
+
+def test_master_recording_falls_back_to_the_given_offset_override_when_measurement_is_inconclusive(tmp_path):
+    # Uncorrelated content (no shared rhythmic structure) can't be automatically measured --
+    # `_estimate_start_offset` declines to guess, so the given override is what actually drives
+    # alignment. Vocal longer than the instrumental so trimming more off its front (a bigger
+    # override offset) measurably shortens the mixed output (amix's duration="longest").
+    samplerate = 44100
+    rng = np.random.default_rng(0)
+    vocal_path = tmp_path / "vocal.wav"
+    instrumental_path = tmp_path / "instrumental.wav"
+    sf.write(vocal_path, (0.02 * rng.standard_normal(int(3.0 * samplerate))).astype(np.float32), samplerate)
+    _write_tone(instrumental_path, duration_s=2.0, samplerate=samplerate, freq_hz=220.0, amplitude=0.2)
+
+    default_mastered = master_recording(vocal_path, instrumental_path, tmp_path / "out_default")
+    overridden_mastered = master_recording(
+        vocal_path, instrumental_path, tmp_path / "out_overridden", recording_offset_seconds=1.0
+    )
+
+    default_data, default_sr = sf.read(default_mastered)
+    overridden_data, overridden_sr = sf.read(overridden_mastered)
+
+    assert default_data.shape[0] / default_sr == pytest.approx(3.0, abs=0.5)
+    assert overridden_data.shape[0] / overridden_sr == pytest.approx(2.0, abs=0.5)
 
 
 def test_master_recording_does_not_clip(tmp_path):

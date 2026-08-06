@@ -383,6 +383,7 @@ def render_recording_mp3(
     vocal: UploadFile = File(...),
     instrumental: UploadFile = File(...),
     song_id: str = Form("recording"),
+    calibration_offset_seconds: float | None = Form(None),
 ) -> FileResponse:
     """Master (denoise/balance/align -- see audio_pipeline/mastering.py) and
     transcode a recorded take -- the browser's separately-recorded vocal and
@@ -390,6 +391,15 @@ def render_recording_mp3(
     -- into an mp3, save it under RECORDINGS_DIR so it shows up in the "My
     recordings" list later, and return it directly so the browser can also
     download it immediately.
+
+    ``calibration_offset_seconds``, when the browser sent one, is that
+    player's own mic-latency calibration (frontend/src/game/calibration.ts,
+    already measured for live-pitch sync and re-run whenever they switch
+    mics) -- passed straight through to `master_recording` so the vocal/
+    instrumental start-alignment uses real per-device latency instead of one
+    fixed guess. Omitted (``None``) for a player who hasn't calibrated yet,
+    in which case `master_recording` falls back to its own module-level
+    default.
 
     Deliberately a plain (not async) def: this does real, sequential ffmpeg
     work (master_recording/transcode_to_mp3) that would otherwise block the
@@ -415,7 +425,9 @@ def render_recording_mp3(
         vocal_path.write_bytes(vocal_bytes)
         instrumental_path.write_bytes(instrumental_bytes)
         try:
-            mastered_path = master_recording(vocal_path, instrumental_path, Path(tmp_dir) / "mastered")
+            mastered_path = master_recording(
+                vocal_path, instrumental_path, Path(tmp_dir) / "mastered", calibration_offset_seconds
+            )
             mp3_path = transcode_to_mp3(mastered_path, Path(tmp_dir))
         except RuntimeError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc

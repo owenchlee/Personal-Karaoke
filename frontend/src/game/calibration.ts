@@ -79,6 +79,15 @@ export function loadCalibrationOffsetSeconds(): number {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+/** Whether a real calibration result is on file, as opposed to `loadCalibrationOffsetSeconds`'s `0`
+ * fallback for "never calibrated" -- callers that need to tell those two apart (e.g.
+ * `useRecording`, which should let the server fall back to its own default rather than send an
+ * unearned `0`) should check this first. */
+export function hasCalibrationOffset(): boolean {
+  if (typeof window === 'undefined' || !window.localStorage) return false
+  return window.localStorage.getItem(STORAGE_KEY) !== null
+}
+
 export function saveCalibrationOffsetSeconds(offsetSeconds: number): void {
   if (typeof window === 'undefined' || !window.localStorage) return
   window.localStorage.setItem(STORAGE_KEY, String(offsetSeconds))
