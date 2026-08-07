@@ -8,10 +8,19 @@ import CachedSongsScreen from './screens/CachedSongsScreen'
 import CalibrationScreen from './screens/CalibrationScreen'
 import RecordingsScreen from './screens/RecordingsScreen'
 import HighScoresScreen from './screens/HighScoresScreen'
+import AppearanceScreen from './screens/AppearanceScreen'
+import { BASE_URL, DEMO_MODE } from './config'
+
+// Screens that need a live job server -- meaningless on the static demo build. Sidebar already
+// omits their nav links, but this also blocks reaching them directly via a typed/bookmarked
+// `?screen=` URL, which would otherwise render a form that fires real fetches against a backend
+// that doesn't exist on GitHub Pages.
+const DEMO_ONLY_SCREENS = new Set(['load', 'recordings', 'highscores'])
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const screen = new URLSearchParams(window.location.search).get('screen')
+  let screen = new URLSearchParams(window.location.search).get('screen')
+  if (DEMO_MODE && DEMO_ONLY_SCREENS.has(screen ?? '')) screen = null
   const isProof = screen === 'proof'
 
   let content = <GameScreen />
@@ -21,6 +30,7 @@ function App() {
   else if (screen === 'calibrate') content = <CalibrationScreen />
   else if (screen === 'recordings') content = <RecordingsScreen />
   else if (screen === 'highscores') content = <HighScoresScreen />
+  else if (screen === 'appearance') content = <AppearanceScreen />
 
   return (
     <>
@@ -34,12 +44,12 @@ function App() {
           >
             <MenuIcon />
           </button>
-          <a className="brand" href="/">
+          <a className="brand" href={BASE_URL}>
             <MicWaveIcon size={22} />
-            Personal Karaoke
+            SingScore
           </a>
         </div>
-        <a className="ghost-link" href={isProof ? '/' : '/?screen=proof'}>
+        <a className="ghost-link" href={isProof ? BASE_URL : `${BASE_URL}?screen=proof`}>
           {isProof ? 'Back to game' : 'Diagnostics'}
         </a>
       </header>

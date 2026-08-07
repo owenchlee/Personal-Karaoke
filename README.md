@@ -1,4 +1,4 @@
-# Personal Karaoke
+# SingScore
 
 **[Try the live demo](https://owenchlee.github.io/Personal-Karaoke/)** — a small set of
 pre-processed songs, playable in the browser with no setup. See "Public demo" below for what's

@@ -44,8 +44,10 @@ function SongLibrary({ onSelect, refreshKey }: SongLibraryProps) {
   }, [refreshKey])
 
   // Best-effort: a failed scores fetch just means no "Best: X%" badges show,
-  // the song list itself still renders fine without it.
+  // the song list itself still renders fine without it. No job server on the demo build to ask.
   useEffect(() => {
+    if (DEMO_MODE) return
+
     let cancelled = false
 
     fetch('/api/scores')

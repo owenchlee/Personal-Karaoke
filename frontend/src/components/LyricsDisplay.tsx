@@ -54,7 +54,7 @@ function LyricsDisplay({ audioRef, words }: LyricsDisplayProps) {
         // Re-tag every visible word rather than just the one word that
         // changed, so seeking backward (which can move the active word
         // earlier than words already marked "sung") corrects itself instead
-        // of leaving stale purple text ahead of the playhead.
+        // of leaving stale accent-colored text ahead of the playhead.
         const elements = wrapperRef.current?.querySelectorAll<HTMLElement>('.lyric-word') ?? []
         elements.forEach((el) => {
           const start = Number(el.dataset.wordStart)

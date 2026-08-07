@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { CloseIcon } from './icons'
-import { DEMO_MODE } from '../config'
+import { BASE_URL, DEMO_MODE } from '../config'
 
 interface SidebarProps {
   open: boolean
@@ -13,12 +13,13 @@ interface SidebarProps {
 const DEMO_ONLY_SCREENS = new Set(['load', 'recordings', 'highscores'])
 
 const ALL_NAV_LINKS: Array<{ href: string; screen: string | null; label: string }> = [
-  { href: '/', screen: null, label: 'Play' },
-  { href: '/?screen=load', screen: 'load', label: 'Load a song' },
-  { href: '/?screen=songs', screen: 'songs', label: 'Cached songs' },
-  { href: '/?screen=recordings', screen: 'recordings', label: 'My recordings' },
-  { href: '/?screen=highscores', screen: 'highscores', label: 'High Scores' },
-  { href: '/?screen=calibrate', screen: 'calibrate', label: 'Mic calibration' },
+  { href: BASE_URL, screen: null, label: 'Play' },
+  { href: `${BASE_URL}?screen=load`, screen: 'load', label: 'Load a song' },
+  { href: `${BASE_URL}?screen=songs`, screen: 'songs', label: 'Cached songs' },
+  { href: `${BASE_URL}?screen=recordings`, screen: 'recordings', label: 'My recordings' },
+  { href: `${BASE_URL}?screen=highscores`, screen: 'highscores', label: 'High Scores' },
+  { href: `${BASE_URL}?screen=calibrate`, screen: 'calibrate', label: 'Mic calibration' },
+  { href: `${BASE_URL}?screen=appearance`, screen: 'appearance', label: 'Appearance' },
 ]
 
 const NAV_LINKS = DEMO_MODE

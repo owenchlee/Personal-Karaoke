@@ -16,7 +16,8 @@ import type { LiveIndicatorState } from '../hooks/useLivePitchIndicator'
 
 const CANVAS_WIDTH_FALLBACK = 900
 const MIN_CANVAS_WIDTH = 240
-const CANVAS_HEIGHT = 320
+const CANVAS_HEIGHT_FALLBACK = 380
+const MIN_CANVAS_HEIGHT = 240
 const PLAYHEAD_X = 150
 const MARGIN_TOP = 20
 const MARGIN_BOTTOM = 20
@@ -99,17 +100,21 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef, latencySeco
     }
     darkModeQuery.addEventListener('change', handleThemeChange)
 
-    // Sized to the container's content box (not stretched via CSS width:100%) and rescaled for
-    // devicePixelRatio, so the highway stays crisp at any viewport width/DPR instead of blurring
-    // when a fixed-resolution bitmap gets stretched on narrow or hi-DPI screens.
+    // Sized to the container's content box (not stretched via CSS width/height: 100%, and not a
+    // fixed pixel constant) and rescaled for devicePixelRatio, so the highway stays crisp at any
+    // viewport size/DPR and fills however much space its container (`.stage`, sized in CSS to a
+    // large chunk of the viewport -- see index.css) actually gives it, rather than blurring when a
+    // fixed-resolution bitmap gets stretched, or rendering into a small fixed-height strip.
     let cssWidth = Math.max(MIN_CANVAS_WIDTH, Math.round(container.clientWidth)) || CANVAS_WIDTH_FALLBACK
+    let cssHeight =
+      Math.max(MIN_CANVAS_HEIGHT, Math.round(container.clientHeight)) || CANVAS_HEIGHT_FALLBACK
     let dpr = window.devicePixelRatio || 1
 
     const applyCanvasSize = () => {
       canvas.width = Math.round(cssWidth * dpr)
-      canvas.height = Math.round(CANVAS_HEIGHT * dpr)
+      canvas.height = Math.round(cssHeight * dpr)
       canvas.style.width = `${cssWidth}px`
-      canvas.style.height = `${CANVAS_HEIGHT}px`
+      canvas.style.height = `${cssHeight}px`
     }
     applyCanvasSize()
 
@@ -117,8 +122,10 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef, latencySeco
       const entry = entries[0]
       if (!entry) return
       const nextWidth = Math.max(MIN_CANVAS_WIDTH, Math.round(entry.contentRect.width))
-      if (nextWidth !== cssWidth) {
+      const nextHeight = Math.max(MIN_CANVAS_HEIGHT, Math.round(entry.contentRect.height))
+      if (nextWidth !== cssWidth || nextHeight !== cssHeight) {
         cssWidth = nextWidth
+        cssHeight = nextHeight
         applyCanvasSize()
       }
     })
@@ -141,7 +148,7 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef, latencySeco
       const currentTime = (audioRef.current?.currentTime ?? 0) - (latencySecondsRef?.current ?? 0)
       const futureWindowSeconds = (cssWidth - PLAYHEAD_X) / DEFAULT_PX_PER_SECOND
 
-      ctx.clearRect(0, 0, cssWidth, CANVAS_HEIGHT)
+      ctx.clearRect(0, 0, cssWidth, cssHeight)
 
       // Absolute note-name gridlines -- see the mapping-strategy note on `getPitchRange` in
       // coords.ts: without these, "near the bottom of the highway" only means "the lowest note in
@@ -149,7 +156,7 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef, latencySeco
       ctx.font = '10px system-ui, sans-serif'
       ctx.textBaseline = 'middle'
       for (const tick of getPitchAxisTicks(pitchRange)) {
-        const y = pitchToY(tick, pitchRange, CANVAS_HEIGHT, MARGIN_TOP, MARGIN_BOTTOM)
+        const y = pitchToY(tick, pitchRange, cssHeight, MARGIN_TOP, MARGIN_BOTTOM)
         ctx.strokeStyle = colors.gridLine
         ctx.lineWidth = 1
         ctx.beginPath()
@@ -164,7 +171,7 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef, latencySeco
       ctx.lineWidth = 2
       ctx.beginPath()
       ctx.moveTo(PLAYHEAD_X, 0)
-      ctx.lineTo(PLAYHEAD_X, CANVAS_HEIGHT)
+      ctx.lineTo(PLAYHEAD_X, cssHeight)
       ctx.stroke()
 
       const visibleNotes = getVisibleNotes(
@@ -181,7 +188,7 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef, latencySeco
       for (const note of visibleNotes) {
         const startX = timeToX(note.onset, currentTime, DEFAULT_PX_PER_SECOND, PLAYHEAD_X)
         const endX = timeToX(note.offset, currentTime, DEFAULT_PX_PER_SECOND, PLAYHEAD_X)
-        const y = pitchToY(note.pitch_midi, pitchRange, CANVAS_HEIGHT, MARGIN_TOP, MARGIN_BOTTOM)
+        const y = pitchToY(note.pitch_midi, pitchRange, cssHeight, MARGIN_TOP, MARGIN_BOTTOM)
         const radius = Math.min(NOTE_BAR_HEIGHT / 2, Math.max(endX - startX, 0) / 2)
 
         let color = colors.pending
@@ -201,7 +208,7 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef, latencySeco
       // only owns the presentation detail of easing the pill smoothly toward that shared target.
       const indicator = indicatorRef?.current
       if (indicator && indicator.smoothedMidi !== null) {
-        const targetY = pitchToY(indicator.smoothedMidi, pitchRange, CANVAS_HEIGHT, MARGIN_TOP, MARGIN_BOTTOM)
+        const targetY = pitchToY(indicator.smoothedMidi, pitchRange, cssHeight, MARGIN_TOP, MARGIN_BOTTOM)
 
         // Snap straight to the target on the first frame after a silence (rather than easing in
         // from wherever the pill last was), so it doesn't visibly sweep across the highway when
@@ -244,7 +251,7 @@ function NoteHighway({ audioRef, notes, indicatorRef, accuraciesRef, latencySeco
     }
   }, [audioRef, notes, indicatorRef, accuraciesRef, latencySecondsRef])
 
-  return <canvas ref={canvasRef} width={CANVAS_WIDTH_FALLBACK} height={CANVAS_HEIGHT} />
+  return <canvas ref={canvasRef} width={CANVAS_WIDTH_FALLBACK} height={CANVAS_HEIGHT_FALLBACK} />
 }
 
 export default NoteHighway

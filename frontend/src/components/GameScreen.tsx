@@ -11,7 +11,7 @@ import { useMicPitch } from '../hooks/useMicPitch'
 import { useRecording } from '../hooks/useRecording'
 import { useScoring } from '../hooks/useScoring'
 import type { ScoreSubmissionResult } from '../types/score'
-import { CACHE_BASE } from '../config'
+import { BASE_URL, CACHE_BASE, DEMO_MODE } from '../config'
 
 function getSongId(): string | null {
   return new URLSearchParams(window.location.search).get('song')
@@ -20,7 +20,7 @@ function getSongId(): string | null {
 function selectSong(slug: string) {
   // Hard navigation so the whole screen (and every hook keyed on songId) starts fresh for the
   // newly chosen song, rather than trying to hot-swap state mid-render.
-  window.location.href = `/?song=${encodeURIComponent(slug)}`
+  window.location.href = `${BASE_URL}?song=${encodeURIComponent(slug)}`
 }
 
 type LoadState = 'loading' | 'loaded' | 'error'
@@ -119,6 +119,9 @@ function GameScreen() {
       const score = getFinalScore()
       setFinalScore(score)
 
+      // No job server on the static demo build to persist scores against.
+      if (DEMO_MODE) return
+
       fetch('/api/scores', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -179,7 +182,7 @@ function GameScreen() {
   }
 
   return (
-    <main className="game-screen">
+    <main className={`game-screen${loadState === 'loaded' ? ' game-screen--player' : ''}`}>
       {loadState === 'loading' && <p className="status-message">Loading song&hellip;</p>}
       {loadState === 'error' && (
         <p className="status-message status-message--error">
