@@ -258,6 +258,33 @@ def test_refine_with_pyin_corrects_a_wrong_octave_and_extends_a_cut_short_offset
     assert refined[0]["duration"] == pytest.approx(refined[0]["offset"] - 0.0)
 
 
+def test_refine_with_pyin_keeps_a_high_note_above_the_old_frequency_ceiling(tmp_path):
+    # `_MAXIMUM_FREQUENCY_HZ` (and therefore `_PYIN_FMAX_HZ`) used to be 1300Hz (~E6) -- below this
+    # note's ~1568Hz (G6, MIDI 91), a real and not-unusual belted pop high note. With the old
+    # ceiling, pyin's search couldn't represent the true fundamental at all and would lock onto an
+    # in-range subharmonic (typically exactly an octave down, MIDI 79), which `_refine_with_pyin`
+    # would then trust as a "confirmed" correction -- silently dropping a correctly-detected high
+    # note an octave. With the ceiling raised past this pitch, pyin should confirm the note at its
+    # real pitch instead of dragging it down.
+    samplerate = 22050
+    audio = _harmonic_tone(1567.98, duration_s=1.5, samplerate=samplerate)
+    notes = [
+        {
+            "pitch_midi": 91,
+            "pitch_hz": 1567.98,
+            "onset": 0.0,
+            "offset": 1.0,
+            "duration": 1.0,
+            "velocity": 0.8,
+        }
+    ]
+
+    refined = _refine_with_pyin(notes, audio, samplerate)
+
+    assert len(refined) == 1
+    assert refined[0]["pitch_midi"] == 91
+
+
 def test_refine_with_pyin_tolerates_a_brief_gap_mid_extension(tmp_path):
     # A real held note with one short, quiet dropout in the middle (a consonant, a breath) --
     # exactly the pattern measured on the real test song where a single noisy pYIN frame right

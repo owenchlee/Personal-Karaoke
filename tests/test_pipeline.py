@@ -136,6 +136,34 @@ def test_remove_notes_without_lyrics_drops_notes_outside_lyric_coverage(tmp_path
     assert [note["pitch_midi"] for note in result] == [62, 64]
 
 
+def test_remove_notes_without_lyrics_keeps_notes_in_an_interior_transcription_gap(tmp_path):
+    # Two lyric lines with a gap between them (e.g. the lyrics pipeline failed to transcribe a
+    # melisma/ad-lib there) -- a note sitting in that interior gap, with no line coverage of its
+    # own, is still real singing between two lines the player is already shown, and should be kept.
+    # Notes before the first line / after the last line are still genuine no-context humming and
+    # should still be dropped.
+    lyrics_path = tmp_path / "lyrics.json"
+    lyrics_path.write_text(json.dumps([
+        {"word": "hello", "start": 10.0, "end": 10.4, "line": 0},
+        {"word": "world", "start": 10.6, "end": 11.0, "line": 0},
+        {"word": "again", "start": 20.0, "end": 20.5, "line": 1},
+    ]))
+
+    notes_path = tmp_path / "notes.json"
+    notes_path.write_text(json.dumps([
+        {"pitch_midi": 60, "onset": 1.0, "offset": 2.0},  # far before the first line -- dropped
+        {"pitch_midi": 62, "onset": 10.2, "offset": 10.8},  # inside the first line -- kept
+        {"pitch_midi": 63, "onset": 15.0, "offset": 15.5},  # interior gap, no line coverage -- kept
+        {"pitch_midi": 64, "onset": 20.1, "offset": 20.4},  # inside the second line -- kept
+        {"pitch_midi": 65, "onset": 30.0, "offset": 30.5},  # well past the last line -- dropped
+    ]))
+
+    _remove_notes_without_lyrics(notes_path, lyrics_path)
+
+    result = json.loads(notes_path.read_text())
+    assert [note["pitch_midi"] for note in result] == [62, 63, 64]
+
+
 def test_remove_notes_without_lyrics_drops_all_notes_when_lyrics_empty(tmp_path):
     lyrics_path = tmp_path / "lyrics.json"
     lyrics_path.write_text(json.dumps([]))

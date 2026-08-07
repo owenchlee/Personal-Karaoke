@@ -73,7 +73,7 @@ def _cached_assets(song_cache_dir: Path) -> SongAssets | None:
 # not humming -- measured directly on a real cached song
 # (`priscilla-chan-night-flight-english-yale-romanization`): a note at 48.26-48.42s shares the
 # same MIDI pitch (66) as the note ending exactly at the line's own reported end (48.18s).
-# Padding each line's span before checking overlap keeps these while still dropping genuine
+# Padding the covered span before checking overlap keeps these while still dropping genuine
 # no-lyrics stretches, which in that same song started/ended tens of seconds from any line
 # (a hummed intro before the first line, and a hummed outro after the last). 0.5s matches the
 # existing `_OFFSET_EXTEND_MAX_SECONDS` / gap-repair margin precedent already used elsewhere in
@@ -82,10 +82,18 @@ _LYRIC_COVERAGE_PADDING_SECONDS = 0.5
 
 
 def _remove_notes_without_lyrics(notes_path: Path, lyrics_path: Path) -> None:
-    """Drop note events that don't overlap any displayed lyric line (padded by
-    ``_LYRIC_COVERAGE_PADDING_SECONDS`` on each side -- see the comment above that constant), so
-    the note highway never shows a note for a stretch the player has no lyric to sing, e.g. a
-    hummed intro/outro with no words at all.
+    """Drop note events that fall entirely outside the sung timeline the lyrics establish -- before
+    the first line or after the last (each padded by ``_LYRIC_COVERAGE_PADDING_SECONDS`` -- see the
+    comment above that constant) -- so the note highway never shows a note for a stretch the player
+    has no lyric context for at all, e.g. a hummed intro/outro.
+
+    Deliberately checks against one envelope spanning the *whole* lyric timeline, not each
+    individual line's own span: the lyrics pipeline (Whisper/lrclib, a completely separate process
+    from melody extraction) sometimes fails to transcribe a stretch *between* two lines it did
+    catch -- melisma, an ad-lib, anything its own gap-repair passes still can't make out. That's a
+    transcription limitation, not evidence the singer went quiet, so a note sitting in one of those
+    interior gaps is real and should stay on the highway even though the specific line nearest it
+    has no words there.
     """
     words = json.loads(lyrics_path.read_text())
     notes = json.loads(notes_path.read_text())
@@ -94,19 +102,12 @@ def _remove_notes_without_lyrics(notes_path: Path, lyrics_path: Path) -> None:
         notes_path.write_text(json.dumps([], indent=2))
         return
 
-    lines: dict[int, list[dict]] = {}
-    for word in words:
-        lines.setdefault(word["line"], []).append(word)
-    spans = [
-        (min(w["start"] for w in line_words), max(w["end"] for w in line_words))
-        for line_words in lines.values()
-    ]
-
     pad = _LYRIC_COVERAGE_PADDING_SECONDS
+    envelope_start = min(w["start"] for w in words) - pad
+    envelope_end = max(w["end"] for w in words) + pad
+
     filtered = [
-        note
-        for note in notes
-        if any(note["onset"] < end + pad and note["offset"] > start - pad for start, end in spans)
+        note for note in notes if note["onset"] < envelope_end and note["offset"] > envelope_start
     ]
     notes_path.write_text(json.dumps(filtered, indent=2))
 

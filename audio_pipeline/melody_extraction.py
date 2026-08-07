@@ -37,14 +37,25 @@ def _midi_to_hz(pitch_midi: int) -> float:
 # fragmentation, but it was measurably suppressing real singing (checked by
 # comparing note coverage against the vocal stem's own energy envelope: at
 # onset=0.65 the game had gaps -- "no bar" -- over 15% of clearly-sung audio,
-# worse than the 8% baseline). minimum_frequency/maximum_frequency bound the
-# extraction to a plausible sung-vocal range (~C2-E6), rejecting low-frequency
-# rumble/bleed picked up by the separator, without affecting real coverage.
+# worse than the 8% baseline). minimum_frequency rejects low-frequency
+# rumble/bleed picked up by the separator without affecting real coverage.
+# maximum_frequency was originally 1300Hz (~E6, "a plausible sung-vocal
+# range") but that's below plenty of real belted pop high notes (money notes
+# commonly sit at Bb5-F6) -- and since the same ceiling also bounds pyin's
+# search range below (`_PYIN_FMAX_HZ`), a genuinely-sung pitch above it isn't
+# just undetected, it actively gets "corrected" wrong: pyin (an
+# autocorrelation/YIN-family tracker) tends to lock onto an in-range
+# subharmonic -- typically exactly one octave down -- when the true
+# fundamental's period falls outside its searched range, and
+# `_refine_with_pyin` trusts that as ground truth. Raised to 1975.5Hz (B6)
+# for real headroom above common belts, while staying clear of where
+# non-vocal high-frequency content (sibilant consonants, cymbal bleed) tends
+# to dominate.
 _ONSET_THRESHOLD = 0.5
 _FRAME_THRESHOLD = 0.2
 _MINIMUM_NOTE_LENGTH_MS = 150.0
 _MINIMUM_FREQUENCY_HZ = 65.0
-_MAXIMUM_FREQUENCY_HZ = 1300.0
+_MAXIMUM_FREQUENCY_HZ = 1975.5
 
 # basic-pitch's own confidence ("velocity") is not a reliable silence
 # detector: on a real song's instrumental-only intro, where the vocal stem
