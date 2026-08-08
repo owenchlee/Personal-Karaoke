@@ -1,0 +1,2300 @@
+[
+  {
+    "word": "I",
+    "start": 10.3,
+    "end": 10.4,
+    "line": 0
+  },
+  {
+    "word": "left",
+    "start": 10.38,
+    "end": 11.42,
+    "line": 0
+  },
+  {
+    "word": "in",
+    "start": 11.4,
+    "end": 11.52,
+    "line": 0
+  },
+  {
+    "word": "the",
+    "start": 11.5,
+    "end": 11.64,
+    "line": 0
+  },
+  {
+    "word": "dead",
+    "start": 11.62,
+    "end": 12.48,
+    "line": 0
+  },
+  {
+    "word": "of",
+    "start": 12.46,
+    "end": 12.8,
+    "line": 0
+  },
+  {
+    "word": "the",
+    "start": 12.78,
+    "end": 12.94,
+    "line": 0
+  },
+  {
+    "word": "new",
+    "start": 12.92,
+    "end": 13.4,
+    "line": 0
+  },
+  {
+    "word": "moon's",
+    "start": 13.38,
+    "end": 14.16,
+    "line": 0
+  },
+  {
+    "word": "veil",
+    "start": 14.14,
+    "end": 15.04,
+    "line": 0
+  },
+  {
+    "word": "I",
+    "start": 15.02,
+    "end": 15.3,
+    "line": 1
+  },
+  {
+    "word": "clung",
+    "start": 15.28,
+    "end": 15.9,
+    "line": 1
+  },
+  {
+    "word": "to",
+    "start": 15.88,
+    "end": 16.22,
+    "line": 1
+  },
+  {
+    "word": "the",
+    "start": 16.2,
+    "end": 16.5,
+    "line": 1
+  },
+  {
+    "word": "side",
+    "start": 16.48,
+    "end": 17.38,
+    "line": 1
+  },
+  {
+    "word": "of",
+    "start": 17.36,
+    "end": 17.74,
+    "line": 1
+  },
+  {
+    "word": "the",
+    "start": 17.72,
+    "end": 17.9,
+    "line": 1
+  },
+  {
+    "word": "camouflaged",
+    "start": 17.88,
+    "end": 19.16,
+    "line": 1
+  },
+  {
+    "word": "trail",
+    "start": 19.14,
+    "end": 19.76,
+    "line": 1
+  },
+  {
+    "word": "I",
+    "start": 19.74,
+    "end": 19.98,
+    "line": 2
+  },
+  {
+    "word": "was",
+    "start": 19.96,
+    "end": 20.64,
+    "line": 2
+  },
+  {
+    "word": "over",
+    "start": 20.62,
+    "end": 21.26,
+    "line": 2
+  },
+  {
+    "word": "the",
+    "start": 21.24,
+    "end": 21.42,
+    "line": 2
+  },
+  {
+    "word": "river",
+    "start": 21.4,
+    "end": 22.2,
+    "line": 2
+  },
+  {
+    "word": "before",
+    "start": 22.18,
+    "end": 23.78,
+    "line": 2
+  },
+  {
+    "word": "the",
+    "start": 23.76,
+    "end": 24.26,
+    "line": 2
+  },
+  {
+    "word": "sky",
+    "start": 24.24,
+    "end": 25.56,
+    "line": 2
+  },
+  {
+    "word": "was",
+    "start": 25.54,
+    "end": 26.08,
+    "line": 2
+  },
+  {
+    "word": "awake",
+    "start": 26.06,
+    "end": 28.62,
+    "line": 2
+  },
+  {
+    "word": "I",
+    "start": 28.6,
+    "end": 30.64,
+    "line": 3
+  },
+  {
+    "word": "kept",
+    "start": 30.62,
+    "end": 31.06,
+    "line": 3
+  },
+  {
+    "word": "my",
+    "start": 31.04,
+    "end": 31.5,
+    "line": 3
+  },
+  {
+    "word": "ear",
+    "start": 31.48,
+    "end": 31.84,
+    "line": 3
+  },
+  {
+    "word": "pressed",
+    "start": 31.82,
+    "end": 32.38,
+    "line": 3
+  },
+  {
+    "word": "to",
+    "start": 32.36,
+    "end": 32.66,
+    "line": 3
+  },
+  {
+    "word": "the",
+    "start": 32.64,
+    "end": 33.0,
+    "line": 3
+  },
+  {
+    "word": "transistor",
+    "start": 32.98,
+    "end": 34.32,
+    "line": 3
+  },
+  {
+    "word": "radio",
+    "start": 34.3,
+    "end": 35.1,
+    "line": 3
+  },
+  {
+    "word": "This",
+    "start": 35.08,
+    "end": 35.42,
+    "line": 4
+  },
+  {
+    "word": "station",
+    "start": 35.4,
+    "end": 36.1,
+    "line": 4
+  },
+  {
+    "word": "was",
+    "start": 36.08,
+    "end": 36.4,
+    "line": 4
+  },
+  {
+    "word": "all",
+    "start": 36.38,
+    "end": 37.14,
+    "line": 4
+  },
+  {
+    "word": "I",
+    "start": 37.12,
+    "end": 37.54,
+    "line": 4
+  },
+  {
+    "word": "had",
+    "start": 37.52,
+    "end": 37.9,
+    "line": 4
+  },
+  {
+    "word": "left",
+    "start": 37.88,
+    "end": 38.56,
+    "line": 4
+  },
+  {
+    "word": "from",
+    "start": 38.54,
+    "end": 38.82,
+    "line": 4
+  },
+  {
+    "word": "my",
+    "start": 38.8,
+    "end": 39.02,
+    "line": 4
+  },
+  {
+    "word": "little",
+    "start": 39.0,
+    "end": 39.38,
+    "line": 4
+  },
+  {
+    "word": "home",
+    "start": 39.36,
+    "end": 40.12,
+    "line": 4
+  },
+  {
+    "word": "I",
+    "start": 40.1,
+    "end": 40.4,
+    "line": 5
+  },
+  {
+    "word": "don't",
+    "start": 40.38,
+    "end": 40.9,
+    "line": 5
+  },
+  {
+    "word": "want",
+    "start": 40.88,
+    "end": 41.14,
+    "line": 5
+  },
+  {
+    "word": "to",
+    "start": 41.12,
+    "end": 41.26,
+    "line": 5
+  },
+  {
+    "word": "leave",
+    "start": 41.24,
+    "end": 42.16,
+    "line": 5
+  },
+  {
+    "word": "but",
+    "start": 42.14,
+    "end": 42.58,
+    "line": 5
+  },
+  {
+    "word": "this",
+    "start": 42.56,
+    "end": 42.88,
+    "line": 5
+  },
+  {
+    "word": "sorrow",
+    "start": 42.86,
+    "end": 43.8,
+    "line": 5
+  },
+  {
+    "word": "was",
+    "start": 43.78,
+    "end": 44.36,
+    "line": 5
+  },
+  {
+    "word": "all",
+    "start": 44.34,
+    "end": 45.86,
+    "line": 5
+  },
+  {
+    "word": "I",
+    "start": 45.84,
+    "end": 46.02,
+    "line": 5
+  },
+  {
+    "word": "could",
+    "start": 46.0,
+    "end": 46.26,
+    "line": 5
+  },
+  {
+    "word": "take",
+    "start": 46.24,
+    "end": 48.58,
+    "line": 5
+  },
+  {
+    "word": "A",
+    "start": 48.56,
+    "end": 50.4,
+    "line": 6
+  },
+  {
+    "word": "static-y",
+    "start": 50.38,
+    "end": 51.08,
+    "line": 6
+  },
+  {
+    "word": "voice",
+    "start": 51.06,
+    "end": 52.24,
+    "line": 6
+  },
+  {
+    "word": "through",
+    "start": 52.22,
+    "end": 52.54,
+    "line": 6
+  },
+  {
+    "word": "the",
+    "start": 52.52,
+    "end": 52.66,
+    "line": 6
+  },
+  {
+    "word": "crackling",
+    "start": 52.64,
+    "end": 53.9,
+    "line": 6
+  },
+  {
+    "word": "speaker",
+    "start": 53.88,
+    "end": 54.66,
+    "line": 6
+  },
+  {
+    "word": "Has",
+    "start": 54.64,
+    "end": 55.2,
+    "line": 7
+  },
+  {
+    "word": "followed",
+    "start": 55.18,
+    "end": 56.1,
+    "line": 7
+  },
+  {
+    "word": "me",
+    "start": 56.08,
+    "end": 56.38,
+    "line": 7
+  },
+  {
+    "word": "all",
+    "start": 56.36,
+    "end": 57.16,
+    "line": 7
+  },
+  {
+    "word": "the",
+    "start": 57.14,
+    "end": 57.3,
+    "line": 7
+  },
+  {
+    "word": "way",
+    "start": 57.28,
+    "end": 57.64,
+    "line": 7
+  },
+  {
+    "word": "here",
+    "start": 57.62,
+    "end": 59.08,
+    "line": 7
+  },
+  {
+    "word": "The",
+    "start": 59.06,
+    "end": 60.16,
+    "line": 8
+  },
+  {
+    "word": "longer",
+    "start": 60.14,
+    "end": 60.92,
+    "line": 8
+  },
+  {
+    "word": "I",
+    "start": 60.9,
+    "end": 61.12,
+    "line": 8
+  },
+  {
+    "word": "go,",
+    "start": 61.1,
+    "end": 61.78,
+    "line": 8
+  },
+  {
+    "word": "we",
+    "start": 61.76,
+    "end": 62.54,
+    "line": 8
+  },
+  {
+    "word": "both",
+    "start": 62.52,
+    "end": 63.08,
+    "line": 8
+  },
+  {
+    "word": "will",
+    "start": 63.06,
+    "end": 63.42,
+    "line": 8
+  },
+  {
+    "word": "get",
+    "start": 63.4,
+    "end": 63.78,
+    "line": 8
+  },
+  {
+    "word": "weaker",
+    "start": 63.76,
+    "end": 64.42,
+    "line": 8
+  },
+  {
+    "word": "Till",
+    "start": 64.4,
+    "end": 65.28,
+    "line": 9
+  },
+  {
+    "word": "one",
+    "start": 65.26,
+    "end": 65.6,
+    "line": 9
+  },
+  {
+    "word": "of",
+    "start": 65.58,
+    "end": 65.82,
+    "line": 9
+  },
+  {
+    "word": "us",
+    "start": 65.8,
+    "end": 66.12,
+    "line": 9
+  },
+  {
+    "word": "just",
+    "start": 66.1,
+    "end": 67.1,
+    "line": 9
+  },
+  {
+    "word": "disappears",
+    "start": 67.08,
+    "end": 69.08,
+    "line": 9
+  },
+  {
+    "word": "I",
+    "start": 69.06,
+    "end": 69.96,
+    "line": 10
+  },
+  {
+    "word": "don't",
+    "start": 69.94,
+    "end": 70.4,
+    "line": 10
+  },
+  {
+    "word": "want",
+    "start": 70.38,
+    "end": 70.68,
+    "line": 10
+  },
+  {
+    "word": "to",
+    "start": 70.66,
+    "end": 70.8,
+    "line": 10
+  },
+  {
+    "word": "go",
+    "start": 70.78,
+    "end": 71.36,
+    "line": 10
+  },
+  {
+    "word": "but",
+    "start": 71.34,
+    "end": 71.92,
+    "line": 10
+  },
+  {
+    "word": "my",
+    "start": 71.9,
+    "end": 72.38,
+    "line": 10
+  },
+  {
+    "word": "duty",
+    "start": 72.36,
+    "end": 73.14,
+    "line": 10
+  },
+  {
+    "word": "is",
+    "start": 73.12,
+    "end": 73.62,
+    "line": 10
+  },
+  {
+    "word": "stronger",
+    "start": 73.6,
+    "end": 74.34,
+    "line": 10
+  },
+  {
+    "word": "than",
+    "start": 74.32,
+    "end": 74.72,
+    "line": 10
+  },
+  {
+    "word": "fear",
+    "start": 74.7,
+    "end": 80.24,
+    "line": 10
+  },
+  {
+    "word": "I",
+    "start": 80.22,
+    "end": 84.86,
+    "line": 11
+  },
+  {
+    "word": "worked",
+    "start": 84.84,
+    "end": 86.08,
+    "line": 11
+  },
+  {
+    "word": "20",
+    "start": 85.94,
+    "end": 86.08,
+    "line": 11
+  },
+  {
+    "word": "years",
+    "start": 86.06,
+    "end": 86.6,
+    "line": 11
+  },
+  {
+    "word": "without",
+    "start": 86.58,
+    "end": 87.26,
+    "line": 11
+  },
+  {
+    "word": "nothing",
+    "start": 87.24,
+    "end": 87.8,
+    "line": 11
+  },
+  {
+    "word": "to",
+    "start": 87.78,
+    "end": 87.98,
+    "line": 11
+  },
+  {
+    "word": "show",
+    "start": 87.96,
+    "end": 89.06,
+    "line": 11
+  },
+  {
+    "word": "So",
+    "start": 89.04,
+    "end": 89.76,
+    "line": 12
+  },
+  {
+    "word": "I",
+    "start": 89.74,
+    "end": 89.86,
+    "line": 12
+  },
+  {
+    "word": "left",
+    "start": 89.84,
+    "end": 90.2,
+    "line": 12
+  },
+  {
+    "word": "behind",
+    "start": 90.18,
+    "end": 91.12,
+    "line": 12
+  },
+  {
+    "word": "everything",
+    "start": 91.1,
+    "end": 92.9,
+    "line": 12
+  },
+  {
+    "word": "that",
+    "start": 92.88,
+    "end": 93.22,
+    "line": 12
+  },
+  {
+    "word": "I've",
+    "start": 93.2,
+    "end": 93.4,
+    "line": 12
+  },
+  {
+    "word": "known",
+    "start": 93.38,
+    "end": 94.24,
+    "line": 12
+  },
+  {
+    "word": "In",
+    "start": 94.22,
+    "end": 94.64,
+    "line": 13
+  },
+  {
+    "word": "the",
+    "start": 94.62,
+    "end": 94.78,
+    "line": 13
+  },
+  {
+    "word": "hope",
+    "start": 94.76,
+    "end": 95.48,
+    "line": 13
+  },
+  {
+    "word": "that",
+    "start": 95.46,
+    "end": 95.66,
+    "line": 13
+  },
+  {
+    "word": "my",
+    "start": 95.64,
+    "end": 95.96,
+    "line": 13
+  },
+  {
+    "word": "family",
+    "start": 95.94,
+    "end": 96.54,
+    "line": 13
+  },
+  {
+    "word": "won't",
+    "start": 96.52,
+    "end": 96.92,
+    "line": 13
+  },
+  {
+    "word": "need",
+    "start": 96.9,
+    "end": 97.64,
+    "line": 13
+  },
+  {
+    "word": "to",
+    "start": 97.62,
+    "end": 98.16,
+    "line": 13
+  },
+  {
+    "word": "go",
+    "start": 98.14,
+    "end": 98.44,
+    "line": 13
+  },
+  {
+    "word": "hungry",
+    "start": 98.42,
+    "end": 99.32,
+    "line": 13
+  },
+  {
+    "word": "again",
+    "start": 99.3,
+    "end": 102.48,
+    "line": 13
+  },
+  {
+    "word": "The",
+    "start": 102.46,
+    "end": 104.84,
+    "line": 14
+  },
+  {
+    "word": "stopped",
+    "start": 104.82,
+    "end": 105.34,
+    "line": 14
+  },
+  {
+    "word": "me",
+    "start": 105.32,
+    "end": 105.62,
+    "line": 14
+  },
+  {
+    "word": "the",
+    "start": 105.6,
+    "end": 105.9,
+    "line": 14
+  },
+  {
+    "word": "last",
+    "start": 105.88,
+    "end": 106.4,
+    "line": 14
+  },
+  {
+    "word": "time",
+    "start": 106.38,
+    "end": 107.06,
+    "line": 14
+  },
+  {
+    "word": "I",
+    "start": 107.04,
+    "end": 107.24,
+    "line": 14
+  },
+  {
+    "word": "tried",
+    "start": 107.22,
+    "end": 107.86,
+    "line": 14
+  },
+  {
+    "word": "this",
+    "start": 107.84,
+    "end": 108.18,
+    "line": 14
+  },
+  {
+    "word": "migration",
+    "start": 108.16,
+    "end": 109.24,
+    "line": 14
+  },
+  {
+    "word": "I'm",
+    "start": 109.22,
+    "end": 109.52,
+    "line": 15
+  },
+  {
+    "word": "the",
+    "start": 109.5,
+    "end": 109.78,
+    "line": 15
+  },
+  {
+    "word": "overflow",
+    "start": 109.76,
+    "end": 110.64,
+    "line": 15
+  },
+  {
+    "word": "man",
+    "start": 110.62,
+    "end": 111.42,
+    "line": 15
+  },
+  {
+    "word": "in",
+    "start": 111.4,
+    "end": 111.8,
+    "line": 15
+  },
+  {
+    "word": "this",
+    "start": 111.78,
+    "end": 112.0,
+    "line": 15
+  },
+  {
+    "word": "melting",
+    "start": 111.98,
+    "end": 112.8,
+    "line": 15
+  },
+  {
+    "word": "pot",
+    "start": 112.78,
+    "end": 113.18,
+    "line": 15
+  },
+  {
+    "word": "nation",
+    "start": 113.16,
+    "end": 113.98,
+    "line": 15
+  },
+  {
+    "word": "But",
+    "start": 113.96,
+    "end": 114.34,
+    "line": 16
+  },
+  {
+    "word": "the",
+    "start": 114.32,
+    "end": 114.5,
+    "line": 16
+  },
+  {
+    "word": "only",
+    "start": 114.48,
+    "end": 115.26,
+    "line": 16
+  },
+  {
+    "word": "thing",
+    "start": 115.24,
+    "end": 115.6,
+    "line": 16
+  },
+  {
+    "word": "here",
+    "start": 115.58,
+    "end": 115.94,
+    "line": 16
+  },
+  {
+    "word": "in",
+    "start": 115.92,
+    "end": 116.06,
+    "line": 16
+  },
+  {
+    "word": "this",
+    "start": 116.04,
+    "end": 116.32,
+    "line": 16
+  },
+  {
+    "word": "desert",
+    "start": 116.3,
+    "end": 117.36,
+    "line": 16
+  },
+  {
+    "word": "is",
+    "start": 117.34,
+    "end": 117.94,
+    "line": 16
+  },
+  {
+    "word": "a",
+    "start": 117.94,
+    "end": 118.04,
+    "line": 16
+  },
+  {
+    "word": "northerly",
+    "start": 118.02,
+    "end": 119.1,
+    "line": 16
+  },
+  {
+    "word": "wind",
+    "start": 119.08,
+    "end": 121.94,
+    "line": 16
+  },
+  {
+    "word": "I'm",
+    "start": 121.92,
+    "end": 124.22,
+    "line": 17
+  },
+  {
+    "word": "not",
+    "start": 124.2,
+    "end": 124.56,
+    "line": 17
+  },
+  {
+    "word": "really",
+    "start": 124.54,
+    "end": 125.04,
+    "line": 17
+  },
+  {
+    "word": "sure",
+    "start": 125.02,
+    "end": 125.98,
+    "line": 17
+  },
+  {
+    "word": "where",
+    "start": 125.96,
+    "end": 126.4,
+    "line": 17
+  },
+  {
+    "word": "the",
+    "start": 126.38,
+    "end": 126.62,
+    "line": 17
+  },
+  {
+    "word": "oxygen's",
+    "start": 126.6,
+    "end": 127.7,
+    "line": 17
+  },
+  {
+    "word": "going",
+    "start": 127.68,
+    "end": 128.34,
+    "line": 17
+  },
+  {
+    "word": "But",
+    "start": 128.32,
+    "end": 128.54,
+    "line": 18
+  },
+  {
+    "word": "it",
+    "start": 128.52,
+    "end": 128.78,
+    "line": 18
+  },
+  {
+    "word": "followed",
+    "start": 128.76,
+    "end": 129.78,
+    "line": 18
+  },
+  {
+    "word": "me",
+    "start": 129.76,
+    "end": 130.08,
+    "line": 18
+  },
+  {
+    "word": "all",
+    "start": 130.06,
+    "end": 130.86,
+    "line": 18
+  },
+  {
+    "word": "the",
+    "start": 130.84,
+    "end": 131.0,
+    "line": 18
+  },
+  {
+    "word": "way",
+    "start": 130.98,
+    "end": 131.34,
+    "line": 18
+  },
+  {
+    "word": "here",
+    "start": 131.32,
+    "end": 132.76,
+    "line": 18
+  },
+  {
+    "word": "The",
+    "start": 132.74,
+    "end": 133.8,
+    "line": 19
+  },
+  {
+    "word": "line",
+    "start": 133.78,
+    "end": 134.32,
+    "line": 19
+  },
+  {
+    "word": "on",
+    "start": 134.3,
+    "end": 134.6,
+    "line": 19
+  },
+  {
+    "word": "the",
+    "start": 134.58,
+    "end": 134.76,
+    "line": 19
+  },
+  {
+    "word": "map",
+    "start": 134.74,
+    "end": 135.66,
+    "line": 19
+  },
+  {
+    "word": "didn't",
+    "start": 135.64,
+    "end": 136.14,
+    "line": 19
+  },
+  {
+    "word": "stop",
+    "start": 136.12,
+    "end": 136.64,
+    "line": 19
+  },
+  {
+    "word": "it",
+    "start": 136.62,
+    "end": 136.92,
+    "line": 19
+  },
+  {
+    "word": "from",
+    "start": 136.9,
+    "end": 137.28,
+    "line": 19
+  },
+  {
+    "word": "blowing",
+    "start": 137.26,
+    "end": 138.06,
+    "line": 19
+  },
+  {
+    "word": "It's",
+    "start": 138.04,
+    "end": 138.46,
+    "line": 20
+  },
+  {
+    "word": "free,",
+    "start": 138.44,
+    "end": 139.0,
+    "line": 20
+  },
+  {
+    "word": "and",
+    "start": 138.98,
+    "end": 139.2,
+    "line": 20
+  },
+  {
+    "word": "that",
+    "start": 139.18,
+    "end": 139.64,
+    "line": 20
+  },
+  {
+    "word": "one",
+    "start": 139.62,
+    "end": 140.26,
+    "line": 20
+  },
+  {
+    "word": "thing",
+    "start": 140.24,
+    "end": 140.5,
+    "line": 20
+  },
+  {
+    "word": "is",
+    "start": 140.48,
+    "end": 140.7,
+    "line": 20
+  },
+  {
+    "word": "clear",
+    "start": 140.68,
+    "end": 142.2,
+    "line": 20
+  },
+  {
+    "word": "I",
+    "start": 142.18,
+    "end": 143.24,
+    "line": 21
+  },
+  {
+    "word": "don't",
+    "start": 143.22,
+    "end": 143.76,
+    "line": 21
+  },
+  {
+    "word": "want",
+    "start": 143.76,
+    "end": 143.92,
+    "line": 21
+  },
+  {
+    "word": "to",
+    "start": 143.9,
+    "end": 144.02,
+    "line": 21
+  },
+  {
+    "word": "go",
+    "start": 144.0,
+    "end": 144.62,
+    "line": 21
+  },
+  {
+    "word": "but",
+    "start": 144.6,
+    "end": 145.24,
+    "line": 21
+  },
+  {
+    "word": "my",
+    "start": 145.22,
+    "end": 145.68,
+    "line": 21
+  },
+  {
+    "word": "duty",
+    "start": 145.66,
+    "end": 146.4,
+    "line": 21
+  },
+  {
+    "word": "is",
+    "start": 146.38,
+    "end": 146.82,
+    "line": 21
+  },
+  {
+    "word": "stronger",
+    "start": 146.8,
+    "end": 147.7,
+    "line": 21
+  },
+  {
+    "word": "than",
+    "start": 147.68,
+    "end": 147.96,
+    "line": 21
+  },
+  {
+    "word": "fear",
+    "start": 147.94,
+    "end": 148.56,
+    "line": 21
+  },
+  {
+    "word": "And",
+    "start": 148.54,
+    "end": 148.68,
+    "line": 22
+  },
+  {
+    "word": "the",
+    "start": 148.68,
+    "end": 148.84,
+    "line": 22
+  },
+  {
+    "word": "sun,",
+    "start": 148.82,
+    "end": 150.06,
+    "line": 22
+  },
+  {
+    "word": "it",
+    "start": 150.04,
+    "end": 150.28,
+    "line": 22
+  },
+  {
+    "word": "doesn't",
+    "start": 150.26,
+    "end": 150.86,
+    "line": 22
+  },
+  {
+    "word": "care",
+    "start": 150.84,
+    "end": 151.82,
+    "line": 22
+  },
+  {
+    "word": "If",
+    "start": 151.8,
+    "end": 152.4,
+    "line": 23
+  },
+  {
+    "word": "it's",
+    "start": 152.38,
+    "end": 152.66,
+    "line": 23
+  },
+  {
+    "word": "here,",
+    "start": 152.64,
+    "end": 153.52,
+    "line": 23
+  },
+  {
+    "word": "or",
+    "start": 153.5,
+    "end": 153.96,
+    "line": 23
+  },
+  {
+    "word": "if",
+    "start": 153.94,
+    "end": 154.22,
+    "line": 23
+  },
+  {
+    "word": "it's",
+    "start": 154.2,
+    "end": 154.72,
+    "line": 23
+  },
+  {
+    "word": "over",
+    "start": 154.7,
+    "end": 155.92,
+    "line": 23
+  },
+  {
+    "word": "there",
+    "start": 155.9,
+    "end": 156.62,
+    "line": 23
+  },
+  {
+    "word": "It",
+    "start": 156.6,
+    "end": 156.94,
+    "line": 24
+  },
+  {
+    "word": "just",
+    "start": 156.92,
+    "end": 157.4,
+    "line": 24
+  },
+  {
+    "word": "passes",
+    "start": 157.38,
+    "end": 158.48,
+    "line": 24
+  },
+  {
+    "word": "through",
+    "start": 158.46,
+    "end": 159.32,
+    "line": 24
+  },
+  {
+    "word": "the",
+    "start": 159.3,
+    "end": 159.6,
+    "line": 24
+  },
+  {
+    "word": "stratosphere",
+    "start": 159.58,
+    "end": 161.46,
+    "line": 24
+  },
+  {
+    "word": "Until",
+    "start": 161.44,
+    "end": 162.38,
+    "line": 25
+  },
+  {
+    "word": "it",
+    "start": 162.36,
+    "end": 162.52,
+    "line": 25
+  },
+  {
+    "word": "goes",
+    "start": 162.5,
+    "end": 163.68,
+    "line": 25
+  },
+  {
+    "word": "away",
+    "start": 163.66,
+    "end": 165.78,
+    "line": 25
+  },
+  {
+    "word": "I",
+    "start": 165.76,
+    "end": 167.1,
+    "line": 26
+  },
+  {
+    "word": "once",
+    "start": 167.08,
+    "end": 167.58,
+    "line": 26
+  },
+  {
+    "word": "watched",
+    "start": 167.56,
+    "end": 168.02,
+    "line": 26
+  },
+  {
+    "word": "a",
+    "start": 168.0,
+    "end": 168.12,
+    "line": 26
+  },
+  {
+    "word": "sparrow",
+    "start": 168.1,
+    "end": 168.88,
+    "line": 26
+  },
+  {
+    "word": "fly",
+    "start": 168.86,
+    "end": 169.46,
+    "line": 26
+  },
+  {
+    "word": "south",
+    "start": 169.44,
+    "end": 170.16,
+    "line": 26
+  },
+  {
+    "word": "for",
+    "start": 170.14,
+    "end": 170.34,
+    "line": 26
+  },
+  {
+    "word": "the",
+    "start": 170.32,
+    "end": 170.48,
+    "line": 26
+  },
+  {
+    "word": "winter",
+    "start": 170.46,
+    "end": 171.36,
+    "line": 26
+  },
+  {
+    "word": "Her",
+    "start": 171.34,
+    "end": 171.96,
+    "line": 27
+  },
+  {
+    "word": "feathers",
+    "start": 171.94,
+    "end": 172.48,
+    "line": 27
+  },
+  {
+    "word": "were",
+    "start": 172.46,
+    "end": 172.76,
+    "line": 27
+  },
+  {
+    "word": "thin,",
+    "start": 172.74,
+    "end": 173.58,
+    "line": 27
+  },
+  {
+    "word": "and",
+    "start": 173.56,
+    "end": 173.82,
+    "line": 27
+  },
+  {
+    "word": "her",
+    "start": 173.8,
+    "end": 174.04,
+    "line": 27
+  },
+  {
+    "word": "body",
+    "start": 174.02,
+    "end": 174.98,
+    "line": 27
+  },
+  {
+    "word": "was",
+    "start": 174.96,
+    "end": 175.28,
+    "line": 27
+  },
+  {
+    "word": "thinner",
+    "start": 175.26,
+    "end": 176.08,
+    "line": 27
+  },
+  {
+    "word": "But",
+    "start": 176.06,
+    "end": 176.64,
+    "line": 28
+  },
+  {
+    "word": "we",
+    "start": 176.62,
+    "end": 177.1,
+    "line": 28
+  },
+  {
+    "word": "had",
+    "start": 177.08,
+    "end": 177.58,
+    "line": 28
+  },
+  {
+    "word": "enough",
+    "start": 177.56,
+    "end": 177.98,
+    "line": 28
+  },
+  {
+    "word": "there",
+    "start": 177.96,
+    "end": 178.6,
+    "line": 28
+  },
+  {
+    "word": "to",
+    "start": 178.58,
+    "end": 178.88,
+    "line": 28
+  },
+  {
+    "word": "feed",
+    "start": 178.86,
+    "end": 179.24,
+    "line": 28
+  },
+  {
+    "word": "her",
+    "start": 179.22,
+    "end": 179.8,
+    "line": 28
+  },
+  {
+    "word": "until",
+    "start": 179.78,
+    "end": 180.84,
+    "line": 28
+  },
+  {
+    "word": "she",
+    "start": 180.82,
+    "end": 181.1,
+    "line": 28
+  },
+  {
+    "word": "was",
+    "start": 181.08,
+    "end": 181.36,
+    "line": 28
+  },
+  {
+    "word": "well",
+    "start": 181.34,
+    "end": 184.24,
+    "line": 28
+  },
+  {
+    "word": "The",
+    "start": 184.22,
+    "end": 186.46,
+    "line": 29
+  },
+  {
+    "word": "seasons",
+    "start": 186.44,
+    "end": 187.4,
+    "line": 29
+  },
+  {
+    "word": "are",
+    "start": 187.38,
+    "end": 187.7,
+    "line": 29
+  },
+  {
+    "word": "cycles,",
+    "start": 187.68,
+    "end": 188.74,
+    "line": 29
+  },
+  {
+    "word": "they",
+    "start": 188.72,
+    "end": 189.0,
+    "line": 29
+  },
+  {
+    "word": "go",
+    "start": 188.98,
+    "end": 189.2,
+    "line": 29
+  },
+  {
+    "word": "back",
+    "start": 189.18,
+    "end": 189.5,
+    "line": 29
+  },
+  {
+    "word": "and",
+    "start": 189.48,
+    "end": 189.7,
+    "line": 29
+  },
+  {
+    "word": "forth",
+    "start": 189.68,
+    "end": 190.92,
+    "line": 29
+  },
+  {
+    "word": "One",
+    "start": 190.9,
+    "end": 191.58,
+    "line": 30
+  },
+  {
+    "word": "day",
+    "start": 191.56,
+    "end": 191.96,
+    "line": 30
+  },
+  {
+    "word": "it's",
+    "start": 191.94,
+    "end": 192.28,
+    "line": 30
+  },
+  {
+    "word": "south",
+    "start": 192.26,
+    "end": 192.9,
+    "line": 30
+  },
+  {
+    "word": "and",
+    "start": 192.88,
+    "end": 193.24,
+    "line": 30
+  },
+  {
+    "word": "the",
+    "start": 193.22,
+    "end": 193.4,
+    "line": 30
+  },
+  {
+    "word": "next",
+    "start": 193.38,
+    "end": 194.24,
+    "line": 30
+  },
+  {
+    "word": "it",
+    "start": 194.22,
+    "end": 194.38,
+    "line": 30
+  },
+  {
+    "word": "is",
+    "start": 194.36,
+    "end": 194.56,
+    "line": 30
+  },
+  {
+    "word": "north",
+    "start": 194.54,
+    "end": 195.58,
+    "line": 30
+  },
+  {
+    "word": "The",
+    "start": 195.56,
+    "end": 196.02,
+    "line": 31
+  },
+  {
+    "word": "just",
+    "start": 196.0,
+    "end": 196.7,
+    "line": 31
+  },
+  {
+    "word": "need",
+    "start": 196.68,
+    "end": 196.92,
+    "line": 31
+  },
+  {
+    "word": "a",
+    "start": 196.9,
+    "end": 197.02,
+    "line": 31
+  },
+  {
+    "word": "little",
+    "start": 197.0,
+    "end": 197.44,
+    "line": 31
+  },
+  {
+    "word": "relief",
+    "start": 197.42,
+    "end": 198.74,
+    "line": 31
+  },
+  {
+    "word": "till",
+    "start": 198.72,
+    "end": 199.48,
+    "line": 31
+  },
+  {
+    "word": "the",
+    "start": 199.46,
+    "end": 199.6,
+    "line": 31
+  },
+  {
+    "word": "snow",
+    "start": 199.58,
+    "end": 200.16,
+    "line": 31
+  },
+  {
+    "word": "starts",
+    "start": 200.14,
+    "end": 200.86,
+    "line": 31
+  },
+  {
+    "word": "to",
+    "start": 200.84,
+    "end": 201.14,
+    "line": 31
+  },
+  {
+    "word": "melt",
+    "start": 201.12,
+    "end": 203.74,
+    "line": 31
+  },
+  {
+    "word": "Today",
+    "start": 203.72,
+    "end": 206.02,
+    "line": 32
+  },
+  {
+    "word": "she's",
+    "start": 206.0,
+    "end": 206.5,
+    "line": 32
+  },
+  {
+    "word": "returning",
+    "start": 206.48,
+    "end": 207.6,
+    "line": 32
+  },
+  {
+    "word": "to",
+    "start": 207.58,
+    "end": 207.82,
+    "line": 32
+  },
+  {
+    "word": "look",
+    "start": 207.8,
+    "end": 208.4,
+    "line": 32
+  },
+  {
+    "word": "for",
+    "start": 208.38,
+    "end": 208.86,
+    "line": 32
+  },
+  {
+    "word": "her",
+    "start": 208.84,
+    "end": 209.08,
+    "line": 32
+  },
+  {
+    "word": "nest",
+    "start": 209.06,
+    "end": 209.7,
+    "line": 32
+  },
+  {
+    "word": "And",
+    "start": 209.68,
+    "end": 209.96,
+    "line": 33
+  },
+  {
+    "word": "she's",
+    "start": 209.94,
+    "end": 210.32,
+    "line": 33
+  },
+  {
+    "word": "followed",
+    "start": 210.3,
+    "end": 211.18,
+    "line": 33
+  },
+  {
+    "word": "me",
+    "start": 211.16,
+    "end": 211.44,
+    "line": 33
+  },
+  {
+    "word": "all",
+    "start": 211.42,
+    "end": 212.02,
+    "line": 33
+  },
+  {
+    "word": "the",
+    "start": 212.0,
+    "end": 212.28,
+    "line": 33
+  },
+  {
+    "word": "way",
+    "start": 212.26,
+    "end": 212.62,
+    "line": 33
+  },
+  {
+    "word": "here",
+    "start": 212.6,
+    "end": 214.1,
+    "line": 33
+  },
+  {
+    "word": "With",
+    "start": 214.08,
+    "end": 215.08,
+    "line": 34
+  },
+  {
+    "word": "nothing",
+    "start": 215.06,
+    "end": 215.7,
+    "line": 34
+  },
+  {
+    "word": "to",
+    "start": 215.68,
+    "end": 215.86,
+    "line": 34
+  },
+  {
+    "word": "hold",
+    "start": 215.84,
+    "end": 216.9,
+    "line": 34
+  },
+  {
+    "word": "but",
+    "start": 216.88,
+    "end": 217.18,
+    "line": 34
+  },
+  {
+    "word": "the",
+    "start": 217.16,
+    "end": 217.32,
+    "line": 34
+  },
+  {
+    "word": "meat",
+    "start": 217.3,
+    "end": 217.8,
+    "line": 34
+  },
+  {
+    "word": "on",
+    "start": 217.78,
+    "end": 218.02,
+    "line": 34
+  },
+  {
+    "word": "her",
+    "start": 218.0,
+    "end": 218.36,
+    "line": 34
+  },
+  {
+    "word": "breast",
+    "start": 218.34,
+    "end": 219.04,
+    "line": 34
+  },
+  {
+    "word": "And",
+    "start": 219.02,
+    "end": 219.38,
+    "line": 35
+  },
+  {
+    "word": "the",
+    "start": 219.38,
+    "end": 219.56,
+    "line": 35
+  },
+  {
+    "word": "promise",
+    "start": 219.54,
+    "end": 220.5,
+    "line": 35
+  },
+  {
+    "word": "of",
+    "start": 220.48,
+    "end": 220.86,
+    "line": 35
+  },
+  {
+    "word": "one",
+    "start": 220.84,
+    "end": 221.58,
+    "line": 35
+  },
+  {
+    "word": "more",
+    "start": 221.56,
+    "end": 221.96,
+    "line": 35
+  },
+  {
+    "word": "year",
+    "start": 221.94,
+    "end": 223.36,
+    "line": 35
+  },
+  {
+    "word": "The",
+    "start": 223.34,
+    "end": 224.32,
+    "line": 36
+  },
+  {
+    "word": "radio",
+    "start": 224.3,
+    "end": 225.14,
+    "line": 36
+  },
+  {
+    "word": "man",
+    "start": 225.12,
+    "end": 225.96,
+    "line": 36
+  },
+  {
+    "word": "is",
+    "start": 225.94,
+    "end": 226.16,
+    "line": 36
+  },
+  {
+    "word": "still",
+    "start": 226.14,
+    "end": 226.56,
+    "line": 36
+  },
+  {
+    "word": "playing",
+    "start": 226.54,
+    "end": 227.24,
+    "line": 36
+  },
+  {
+    "word": "his",
+    "start": 227.22,
+    "end": 227.66,
+    "line": 36
+  },
+  {
+    "word": "songs",
+    "start": 227.64,
+    "end": 228.4,
+    "line": 36
+  },
+  {
+    "word": "But",
+    "start": 228.38,
+    "end": 228.56,
+    "line": 37
+  },
+  {
+    "word": "the",
+    "start": 228.54,
+    "end": 228.8,
+    "line": 37
+  },
+  {
+    "word": "signal",
+    "start": 228.78,
+    "end": 229.62,
+    "line": 37
+  },
+  {
+    "word": "is",
+    "start": 229.6,
+    "end": 229.86,
+    "line": 37
+  },
+  {
+    "word": "not",
+    "start": 229.84,
+    "end": 230.38,
+    "line": 37
+  },
+  {
+    "word": "quite",
+    "start": 230.36,
+    "end": 230.86,
+    "line": 37
+  },
+  {
+    "word": "as",
+    "start": 230.84,
+    "end": 231.02,
+    "line": 37
+  },
+  {
+    "word": "clear",
+    "start": 231.0,
+    "end": 232.48,
+    "line": 37
+  },
+  {
+    "word": "I'd",
+    "start": 232.46,
+    "end": 233.54,
+    "line": 38
+  },
+  {
+    "word": "rather",
+    "start": 233.52,
+    "end": 234.02,
+    "line": 38
+  },
+  {
+    "word": "be",
+    "start": 234.0,
+    "end": 234.26,
+    "line": 38
+  },
+  {
+    "word": "back",
+    "start": 234.24,
+    "end": 234.82,
+    "line": 38
+  },
+  {
+    "word": "at",
+    "start": 234.8,
+    "end": 235.26,
+    "line": 38
+  },
+  {
+    "word": "the",
+    "start": 235.24,
+    "end": 235.76,
+    "line": 38
+  },
+  {
+    "word": "place",
+    "start": 235.74,
+    "end": 236.42,
+    "line": 38
+  },
+  {
+    "word": "I",
+    "start": 236.4,
+    "end": 236.62,
+    "line": 38
+  },
+  {
+    "word": "belong",
+    "start": 236.6,
+    "end": 237.48,
+    "line": 38
+  },
+  {
+    "word": "But",
+    "start": 237.46,
+    "end": 237.68,
+    "line": 39
+  },
+  {
+    "word": "my",
+    "start": 237.66,
+    "end": 238.06,
+    "line": 39
+  },
+  {
+    "word": "family",
+    "start": 238.04,
+    "end": 238.86,
+    "line": 39
+  },
+  {
+    "word": "is",
+    "start": 238.84,
+    "end": 239.1,
+    "line": 39
+  },
+  {
+    "word": "needing",
+    "start": 239.08,
+    "end": 239.98,
+    "line": 39
+  },
+  {
+    "word": "me",
+    "start": 239.96,
+    "end": 240.18,
+    "line": 39
+  },
+  {
+    "word": "here",
+    "start": 240.16,
+    "end": 243.04,
+    "line": 39
+  },
+  {
+    "word": "I",
+    "start": 243.02,
+    "end": 245.26,
+    "line": 40
+  },
+  {
+    "word": "don't",
+    "start": 245.24,
+    "end": 245.7,
+    "line": 40
+  },
+  {
+    "word": "want",
+    "start": 245.68,
+    "end": 245.98,
+    "line": 40
+  },
+  {
+    "word": "to",
+    "start": 245.96,
+    "end": 246.1,
+    "line": 40
+  },
+  {
+    "word": "go",
+    "start": 246.08,
+    "end": 246.56,
+    "line": 40
+  },
+  {
+    "word": "but",
+    "start": 246.54,
+    "end": 247.0,
+    "line": 40
+  },
+  {
+    "word": "my",
+    "start": 246.98,
+    "end": 247.52,
+    "line": 40
+  },
+  {
+    "word": "duty",
+    "start": 247.5,
+    "end": 248.3,
+    "line": 40
+  },
+  {
+    "word": "is",
+    "start": 248.28,
+    "end": 248.7,
+    "line": 40
+  },
+  {
+    "word": "stronger",
+    "start": 248.68,
+    "end": 249.66,
+    "line": 40
+  },
+  {
+    "word": "than",
+    "start": 249.64,
+    "end": 249.92,
+    "line": 40
+  },
+  {
+    "word": "fear",
+    "start": 249.9,
+    "end": 252.64,
+    "line": 40
+  },
+  {
+    "word": "I",
+    "start": 252.62,
+    "end": 254.52,
+    "line": 41
+  },
+  {
+    "word": "don't",
+    "start": 254.5,
+    "end": 255.0,
+    "line": 41
+  },
+  {
+    "word": "want",
+    "start": 254.98,
+    "end": 255.32,
+    "line": 41
+  },
+  {
+    "word": "to",
+    "start": 255.3,
+    "end": 255.44,
+    "line": 41
+  },
+  {
+    "word": "go",
+    "start": 255.42,
+    "end": 255.92,
+    "line": 41
+  },
+  {
+    "word": "but",
+    "start": 255.9,
+    "end": 256.38,
+    "line": 41
+  },
+  {
+    "word": "my",
+    "start": 256.36,
+    "end": 256.92,
+    "line": 41
+  },
+  {
+    "word": "duty",
+    "start": 256.9,
+    "end": 258.84,
+    "line": 41
+  },
+  {
+    "word": "is",
+    "start": 258.82,
+    "end": 260.42,
+    "line": 41
+  },
+  {
+    "word": "stronger",
+    "start": 260.4,
+    "end": 261.86,
+    "line": 41
+  },
+  {
+    "word": "than",
+    "start": 261.84,
+    "end": 262.12,
+    "line": 41
+  },
+  {
+    "word": "fear",
+    "start": 262.1,
+    "end": 262.82,
+    "line": 41
+  }
+]

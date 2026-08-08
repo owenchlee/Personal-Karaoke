@@ -1,0 +1,914 @@
+[
+  {
+    "word": "I",
+    "start": 13.76,
+    "end": 13.92,
+    "line": 0
+  },
+  {
+    "word": "saw",
+    "start": 13.9,
+    "end": 14.48,
+    "line": 0
+  },
+  {
+    "word": "you",
+    "start": 14.46,
+    "end": 14.82,
+    "line": 0
+  },
+  {
+    "word": "drowning",
+    "start": 14.8,
+    "end": 15.76,
+    "line": 0
+  },
+  {
+    "word": "in",
+    "start": 15.74,
+    "end": 16.28,
+    "line": 0
+  },
+  {
+    "word": "a",
+    "start": 16.26,
+    "end": 16.46,
+    "line": 0
+  },
+  {
+    "word": "paper",
+    "start": 16.44,
+    "end": 17.6,
+    "line": 0
+  },
+  {
+    "word": "cup",
+    "start": 17.58,
+    "end": 19.56,
+    "line": 0
+  },
+  {
+    "word": "And",
+    "start": 19.54,
+    "end": 20.8,
+    "line": 1
+  },
+  {
+    "word": "I",
+    "start": 20.78,
+    "end": 21.0,
+    "line": 1
+  },
+  {
+    "word": "just",
+    "start": 20.98,
+    "end": 21.52,
+    "line": 1
+  },
+  {
+    "word": "watched",
+    "start": 21.5,
+    "end": 22.08,
+    "line": 1
+  },
+  {
+    "word": "as",
+    "start": 22.06,
+    "end": 22.44,
+    "line": 1
+  },
+  {
+    "word": "you",
+    "start": 22.42,
+    "end": 22.76,
+    "line": 1
+  },
+  {
+    "word": "went",
+    "start": 22.74,
+    "end": 23.58,
+    "line": 1
+  },
+  {
+    "word": "down",
+    "start": 23.58,
+    "end": 26.12,
+    "line": 1
+  },
+  {
+    "word": "You",
+    "start": 26.1,
+    "end": 27.26,
+    "line": 2
+  },
+  {
+    "word": "didn't",
+    "start": 27.24,
+    "end": 28.08,
+    "line": 2
+  },
+  {
+    "word": "seem",
+    "start": 28.06,
+    "end": 28.58,
+    "line": 2
+  },
+  {
+    "word": "to",
+    "start": 28.56,
+    "end": 28.86,
+    "line": 2
+  },
+  {
+    "word": "know",
+    "start": 28.84,
+    "end": 29.36,
+    "line": 2
+  },
+  {
+    "word": "which",
+    "start": 29.34,
+    "end": 29.78,
+    "line": 2
+  },
+  {
+    "word": "way",
+    "start": 29.76,
+    "end": 30.16,
+    "line": 2
+  },
+  {
+    "word": "was",
+    "start": 30.14,
+    "end": 31.24,
+    "line": 2
+  },
+  {
+    "word": "up",
+    "start": 31.22,
+    "end": 32.12,
+    "line": 2
+  },
+  {
+    "word": "You",
+    "start": 32.1,
+    "end": 32.6,
+    "line": 3
+  },
+  {
+    "word": "just",
+    "start": 32.58,
+    "end": 33.12,
+    "line": 3
+  },
+  {
+    "word": "watched",
+    "start": 33.1,
+    "end": 33.92,
+    "line": 3
+  },
+  {
+    "word": "the",
+    "start": 33.9,
+    "end": 34.16,
+    "line": 3
+  },
+  {
+    "word": "world",
+    "start": 34.14,
+    "end": 35.08,
+    "line": 3
+  },
+  {
+    "word": "go",
+    "start": 35.06,
+    "end": 35.54,
+    "line": 3
+  },
+  {
+    "word": "around",
+    "start": 35.52,
+    "end": 39.34,
+    "line": 3
+  },
+  {
+    "word": "The",
+    "start": 39.32,
+    "end": 40.44,
+    "line": 4
+  },
+  {
+    "word": "water",
+    "start": 40.42,
+    "end": 41.26,
+    "line": 4
+  },
+  {
+    "word": "swirled",
+    "start": 41.24,
+    "end": 42.26,
+    "line": 4
+  },
+  {
+    "word": "and",
+    "start": 42.24,
+    "end": 42.74,
+    "line": 4
+  },
+  {
+    "word": "it",
+    "start": 42.72,
+    "end": 42.98,
+    "line": 4
+  },
+  {
+    "word": "tugged",
+    "start": 42.96,
+    "end": 43.56,
+    "line": 4
+  },
+  {
+    "word": "at",
+    "start": 43.54,
+    "end": 43.86,
+    "line": 4
+  },
+  {
+    "word": "your",
+    "start": 43.84,
+    "end": 44.26,
+    "line": 4
+  },
+  {
+    "word": "feet",
+    "start": 44.24,
+    "end": 46.12,
+    "line": 4
+  },
+  {
+    "word": "Your",
+    "start": 46.1,
+    "end": 47.14,
+    "line": 5
+  },
+  {
+    "word": "little",
+    "start": 47.12,
+    "end": 47.88,
+    "line": 5
+  },
+  {
+    "word": "private",
+    "start": 47.86,
+    "end": 48.82,
+    "line": 5
+  },
+  {
+    "word": "hurricane",
+    "start": 48.8,
+    "end": 52.7,
+    "line": 5
+  },
+  {
+    "word": "And",
+    "start": 52.68,
+    "end": 53.92,
+    "line": 6
+  },
+  {
+    "word": "as",
+    "start": 53.9,
+    "end": 54.28,
+    "line": 6
+  },
+  {
+    "word": "you",
+    "start": 54.26,
+    "end": 54.56,
+    "line": 6
+  },
+  {
+    "word": "teetered",
+    "start": 54.54,
+    "end": 55.48,
+    "line": 6
+  },
+  {
+    "word": "on",
+    "start": 55.46,
+    "end": 55.88,
+    "line": 6
+  },
+  {
+    "word": "the",
+    "start": 55.86,
+    "end": 56.34,
+    "line": 6
+  },
+  {
+    "word": "edge",
+    "start": 56.32,
+    "end": 56.8,
+    "line": 6
+  },
+  {
+    "word": "of",
+    "start": 56.78,
+    "end": 57.06,
+    "line": 6
+  },
+  {
+    "word": "defeat",
+    "start": 57.04,
+    "end": 58.66,
+    "line": 6
+  },
+  {
+    "word": "I",
+    "start": 58.64,
+    "end": 59.14,
+    "line": 7
+  },
+  {
+    "word": "could",
+    "start": 59.12,
+    "end": 59.7,
+    "line": 7
+  },
+  {
+    "word": "almost",
+    "start": 59.68,
+    "end": 60.48,
+    "line": 7
+  },
+  {
+    "word": "hear",
+    "start": 60.46,
+    "end": 60.82,
+    "line": 7
+  },
+  {
+    "word": "you",
+    "start": 60.8,
+    "end": 61.12,
+    "line": 7
+  },
+  {
+    "word": "calling",
+    "start": 61.1,
+    "end": 62.44,
+    "line": 7
+  },
+  {
+    "word": "my",
+    "start": 62.42,
+    "end": 63.14,
+    "line": 7
+  },
+  {
+    "word": "name",
+    "start": 63.12,
+    "end": 66.64,
+    "line": 7
+  },
+  {
+    "word": "Oh,",
+    "start": 66.62,
+    "end": 71.06,
+    "line": 8
+  },
+  {
+    "word": "did",
+    "start": 71.04,
+    "end": 71.62,
+    "line": 8
+  },
+  {
+    "word": "you",
+    "start": 71.6,
+    "end": 71.92,
+    "line": 8
+  },
+  {
+    "word": "believe",
+    "start": 71.9,
+    "end": 73.28,
+    "line": 8
+  },
+  {
+    "word": "what",
+    "start": 73.26,
+    "end": 73.82,
+    "line": 8
+  },
+  {
+    "word": "I",
+    "start": 73.8,
+    "end": 74.02,
+    "line": 8
+  },
+  {
+    "word": "said",
+    "start": 74.0,
+    "end": 75.04,
+    "line": 8
+  },
+  {
+    "word": "That",
+    "start": 75.02,
+    "end": 75.82,
+    "line": 9
+  },
+  {
+    "word": "I'm",
+    "start": 75.8,
+    "end": 76.1,
+    "line": 9
+  },
+  {
+    "word": "never",
+    "start": 76.08,
+    "end": 76.88,
+    "line": 9
+  },
+  {
+    "word": "gonna",
+    "start": 76.86,
+    "end": 77.68,
+    "line": 9
+  },
+  {
+    "word": "see",
+    "start": 77.66,
+    "end": 78.18,
+    "line": 9
+  },
+  {
+    "word": "you",
+    "start": 78.16,
+    "end": 78.62,
+    "line": 9
+  },
+  {
+    "word": "again",
+    "start": 78.6,
+    "end": 81.66,
+    "line": 9
+  },
+  {
+    "word": "Don't",
+    "start": 81.64,
+    "end": 83.6,
+    "line": 10
+  },
+  {
+    "word": "let",
+    "start": 83.58,
+    "end": 84.0,
+    "line": 10
+  },
+  {
+    "word": "me",
+    "start": 83.98,
+    "end": 84.32,
+    "line": 10
+  },
+  {
+    "word": "follow",
+    "start": 84.3,
+    "end": 85.22,
+    "line": 10
+  },
+  {
+    "word": "you",
+    "start": 85.2,
+    "end": 85.66,
+    "line": 10
+  },
+  {
+    "word": "into",
+    "start": 85.64,
+    "end": 86.38,
+    "line": 10
+  },
+  {
+    "word": "this",
+    "start": 86.36,
+    "end": 86.86,
+    "line": 10
+  },
+  {
+    "word": "disease",
+    "start": 86.84,
+    "end": 88.62,
+    "line": 10
+  },
+  {
+    "word": "I",
+    "start": 88.6,
+    "end": 88.98,
+    "line": 11
+  },
+  {
+    "word": "won't",
+    "start": 88.96,
+    "end": 89.44,
+    "line": 11
+  },
+  {
+    "word": "let",
+    "start": 89.44,
+    "end": 89.86,
+    "line": 11
+  },
+  {
+    "word": "you",
+    "start": 89.84,
+    "end": 90.36,
+    "line": 11
+  },
+  {
+    "word": "win",
+    "start": 90.34,
+    "end": 109.72,
+    "line": 11
+  },
+  {
+    "word": "I",
+    "start": 109.7,
+    "end": 109.94,
+    "line": 12
+  },
+  {
+    "word": "could",
+    "start": 109.92,
+    "end": 110.58,
+    "line": 12
+  },
+  {
+    "word": "have",
+    "start": 110.58,
+    "end": 111.0,
+    "line": 12
+  },
+  {
+    "word": "reached",
+    "start": 110.98,
+    "end": 111.44,
+    "line": 12
+  },
+  {
+    "word": "a",
+    "start": 111.42,
+    "end": 111.62,
+    "line": 12
+  },
+  {
+    "word": "hand",
+    "start": 111.6,
+    "end": 112.14,
+    "line": 12
+  },
+  {
+    "word": "to",
+    "start": 112.12,
+    "end": 112.5,
+    "line": 12
+  },
+  {
+    "word": "carry",
+    "start": 112.48,
+    "end": 113.34,
+    "line": 12
+  },
+  {
+    "word": "you",
+    "start": 113.32,
+    "end": 113.82,
+    "line": 12
+  },
+  {
+    "word": "out",
+    "start": 113.8,
+    "end": 115.72,
+    "line": 12
+  },
+  {
+    "word": "I",
+    "start": 115.7,
+    "end": 116.56,
+    "line": 13
+  },
+  {
+    "word": "could",
+    "start": 116.54,
+    "end": 117.16,
+    "line": 13
+  },
+  {
+    "word": "have",
+    "start": 117.16,
+    "end": 117.5,
+    "line": 13
+  },
+  {
+    "word": "jumped",
+    "start": 117.5,
+    "end": 118.06,
+    "line": 13
+  },
+  {
+    "word": "in",
+    "start": 118.04,
+    "end": 118.26,
+    "line": 13
+  },
+  {
+    "word": "on",
+    "start": 118.24,
+    "end": 118.4,
+    "line": 13
+  },
+  {
+    "word": "my",
+    "start": 118.4,
+    "end": 118.48,
+    "line": 13
+  },
+  {
+    "word": "own",
+    "start": 118.46,
+    "end": 118.74,
+    "line": 13
+  },
+  {
+    "word": "But",
+    "start": 118.72,
+    "end": 123.44,
+    "line": 14
+  },
+  {
+    "word": "if",
+    "start": 123.42,
+    "end": 123.8,
+    "line": 14
+  },
+  {
+    "word": "you're",
+    "start": 123.78,
+    "end": 124.12,
+    "line": 14
+  },
+  {
+    "word": "gonna",
+    "start": 124.1,
+    "end": 124.9,
+    "line": 14
+  },
+  {
+    "word": "let",
+    "start": 124.88,
+    "end": 125.34,
+    "line": 14
+  },
+  {
+    "word": "yourself",
+    "start": 125.32,
+    "end": 126.16,
+    "line": 14
+  },
+  {
+    "word": "fall",
+    "start": 126.14,
+    "end": 126.92,
+    "line": 14
+  },
+  {
+    "word": "down",
+    "start": 126.9,
+    "end": 127.94,
+    "line": 14
+  },
+  {
+    "word": "You'll",
+    "start": 127.92,
+    "end": 128.64,
+    "line": 15
+  },
+  {
+    "word": "be",
+    "start": 128.62,
+    "end": 128.98,
+    "line": 15
+  },
+  {
+    "word": "going",
+    "start": 128.96,
+    "end": 129.9,
+    "line": 15
+  },
+  {
+    "word": "to",
+    "start": 129.88,
+    "end": 130.26,
+    "line": 15
+  },
+  {
+    "word": "the",
+    "start": 130.24,
+    "end": 130.68,
+    "line": 15
+  },
+  {
+    "word": "bottom",
+    "start": 130.66,
+    "end": 131.68,
+    "line": 15
+  },
+  {
+    "word": "alone",
+    "start": 131.66,
+    "end": 142.04,
+    "line": 15
+  },
+  {
+    "word": "This",
+    "start": 142.02,
+    "end": 149.8,
+    "line": 16
+  },
+  {
+    "word": "ship",
+    "start": 149.78,
+    "end": 150.3,
+    "line": 16
+  },
+  {
+    "word": "is",
+    "start": 150.28,
+    "end": 150.6,
+    "line": 16
+  },
+  {
+    "word": "sinking",
+    "start": 150.58,
+    "end": 151.48,
+    "line": 16
+  },
+  {
+    "word": "and",
+    "start": 151.46,
+    "end": 151.9,
+    "line": 16
+  },
+  {
+    "word": "there's",
+    "start": 151.88,
+    "end": 152.26,
+    "line": 16
+  },
+  {
+    "word": "no",
+    "start": 152.24,
+    "end": 152.58,
+    "line": 16
+  },
+  {
+    "word": "way",
+    "start": 152.56,
+    "end": 153.34,
+    "line": 16
+  },
+  {
+    "word": "out",
+    "start": 153.32,
+    "end": 154.78,
+    "line": 16
+  },
+  {
+    "word": "You",
+    "start": 154.76,
+    "end": 155.04,
+    "line": 17
+  },
+  {
+    "word": "are",
+    "start": 155.02,
+    "end": 155.24,
+    "line": 17
+  },
+  {
+    "word": "the",
+    "start": 155.22,
+    "end": 155.36,
+    "line": 17
+  },
+  {
+    "word": "captain,",
+    "start": 155.34,
+    "end": 157.36,
+    "line": 17
+  },
+  {
+    "word": "I",
+    "start": 157.34,
+    "end": 158.28,
+    "line": 17
+  },
+  {
+    "word": "guess",
+    "start": 158.26,
+    "end": 158.46,
+    "line": 17
+  },
+  {
+    "word": "that",
+    "start": 158.46,
+    "end": 158.54,
+    "line": 17
+  },
+  {
+    "word": "you're",
+    "start": 158.54,
+    "end": 158.66,
+    "line": 17
+  },
+  {
+    "word": "trapped",
+    "start": 158.66,
+    "end": 159.4,
+    "line": 17
+  },
+  {
+    "word": "in,",
+    "start": 159.38,
+    "end": 160.9,
+    "line": 17
+  },
+  {
+    "word": "but",
+    "start": 160.88,
+    "end": 161.32,
+    "line": 17
+  },
+  {
+    "word": "I",
+    "start": 161.3,
+    "end": 161.86,
+    "line": 17
+  },
+  {
+    "word": "I",
+    "start": 161.84,
+    "end": 162.7,
+    "line": 18
+  },
+  {
+    "word": "don't",
+    "start": 162.68,
+    "end": 163.78,
+    "line": 18
+  },
+  {
+    "word": "know",
+    "start": 163.76,
+    "end": 164.28,
+    "line": 18
+  },
+  {
+    "word": "you,",
+    "start": 164.26,
+    "end": 164.94,
+    "line": 18
+  },
+  {
+    "word": "I",
+    "start": 164.92,
+    "end": 165.8,
+    "line": 18
+  },
+  {
+    "word": "don't",
+    "start": 165.78,
+    "end": 167.1,
+    "line": 18
+  },
+  {
+    "word": "owe",
+    "start": 167.08,
+    "end": 167.8,
+    "line": 18
+  },
+  {
+    "word": "you",
+    "start": 167.78,
+    "end": 168.24,
+    "line": 18
+  },
+  {
+    "word": "anything",
+    "start": 168.22,
+    "end": 175.52,
+    "line": 18
+  }
+]
