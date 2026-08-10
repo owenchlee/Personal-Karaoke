@@ -19,7 +19,6 @@ const ALL_NAV_LINKS: Array<{ href: string; screen: string | null; label: string 
   { href: `${BASE_URL}?screen=recordings`, screen: 'recordings', label: 'My recordings' },
   { href: `${BASE_URL}?screen=highscores`, screen: 'highscores', label: 'High Scores' },
   { href: `${BASE_URL}?screen=calibrate`, screen: 'calibrate', label: 'Mic calibration' },
-  { href: `${BASE_URL}?screen=appearance`, screen: 'appearance', label: 'Appearance' },
 ]
 
 const NAV_LINKS = DEMO_MODE

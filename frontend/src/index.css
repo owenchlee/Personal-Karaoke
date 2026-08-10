@@ -7,11 +7,10 @@
   --surface-2: #f3f1ee;
   --border: #e4e1dc;
 
-  /* --accent is the only color a user override (see game/theme.ts) needs to touch -- --accent-bg
-     and --accent-border are derived from it with color-mix() rather than stored as separate
-     hardcoded rgba values, so they stay correct for light mode, dark mode, and any custom accent
-     color without needing a matching bg/border pair hand-picked for each. */
-  --accent: #db2777;
+  /* --accent-bg and --accent-border are derived from --accent with color-mix() rather than stored
+     as separate hardcoded rgba values, so they stay correct for both light mode and dark mode
+     without needing a matching bg/border pair hand-picked for each. */
+  --accent: #c026d3;
   --accent-bg: color-mix(in srgb, var(--accent) 12%, transparent);
   --accent-border: color-mix(in srgb, var(--accent) 38%, transparent);
 
@@ -38,9 +37,9 @@
   --space-7: 48px;
   --space-8: 64px;
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
 
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
@@ -88,7 +87,7 @@
     --surface-2: #241f1c;
     --border: #3a332e;
 
-    --accent: #f472b6;
+    --accent: #e879f9;
 
     --cta: #22c55e;
     --cta-hover: #4ade80;
@@ -206,7 +205,12 @@ code {
   text-decoration: none;
 }
 
-.brand svg {
+.brand-mark {
+  flex-shrink: 0;
+  border-radius: 22%;
+}
+
+.brand-score {
   color: var(--accent);
 }
 
@@ -259,7 +263,7 @@ code {
 }
 
 .player-panel {
-  border-top: 2px solid var(--accent);
+  border-top: 4px solid var(--accent);
   padding: var(--space-6) var(--space-5);
 }
 
@@ -630,7 +634,7 @@ code {
 
 .progress-bar {
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
   overflow: hidden;
 }
@@ -654,55 +658,6 @@ code {
 .calibration-running,
 .calibration-result {
   margin-top: var(--space-3);
-}
-
-/* Appearance */
-
-.accent-swatches {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  margin-top: var(--space-4);
-}
-
-.accent-swatch {
-  position: relative;
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  border-radius: 50%;
-  border: 2px solid var(--surface);
-  box-shadow: 0 0 0 1px var(--border);
-  cursor: pointer;
-  transition: transform 100ms ease, box-shadow 150ms ease;
-}
-
-.accent-swatch:hover {
-  transform: scale(1.06);
-}
-
-.accent-swatch--active {
-  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--text-h);
-}
-
-.accent-swatch--custom {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.accent-swatch--custom input[type='color'] {
-  width: 140%;
-  height: 140%;
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: pointer;
-}
-
-.accent-reset-row {
-  margin-top: var(--space-5);
 }
 
 /* Sidebar */
@@ -881,7 +836,7 @@ code {
 .recording-dot {
   width: 9px;
   height: 9px;
-  border-radius: 50%;
+  border-radius: 1px;
   background: var(--danger);
   animation: recording-pulse 1.2s ease-in-out infinite;
 }
@@ -1023,10 +978,9 @@ code {
   height: clamp(380px, 62vh, 760px);
   border-radius: var(--radius-md);
   overflow: hidden;
-  border: 1px solid var(--accent-border);
+  border: 1px solid var(--border);
   background: var(--stage-bg);
   padding: var(--space-2);
-  box-shadow: inset 0 0 0 1px var(--surface);
 }
 
 .stage canvas {
@@ -1043,26 +997,34 @@ code {
   text-align: center;
 }
 
+/* Fixed (not min-) height per row, sized for up to two wrapped rows at that role's font-size --
+   lets the active/adjacent lines re-tag every beat without the container reflowing, which used to
+   shift the note highway below up and down in step with the lyrics (min-height was in em, so it
+   tracked each role's own font-size rather than staying constant). align-content centers whatever
+   actually renders (one wrapped row or two) inside that fixed box; overflow guards the rare line
+   long enough to want a third. */
 .lyric-line {
   display: flex;
   flex-wrap: wrap;
+  align-content: center;
   justify-content: center;
   column-gap: 0.3em;
   row-gap: 0.2em;
-  min-height: 1.5em;
-  line-height: 1.5em;
-  transition: opacity 200ms ease, font-size 200ms ease;
+  overflow: hidden;
+  transition: opacity 200ms ease;
 }
 
 .lyric-line--prev,
 .lyric-line--next {
   opacity: 0.4;
   font-size: 16px;
+  height: 48px;
 }
 
 .lyric-line--current {
   font-size: 26px;
   font-weight: 600;
+  height: 78px;
 }
 
 .lyric-word {
@@ -1075,7 +1037,7 @@ code {
 
 .lyric-word--active {
   background: var(--accent-bg);
-  box-shadow: inset 0 0 0 1px var(--accent-border);
+  border-bottom: 2px solid var(--accent);
 }
 
 /* Karaoke fill: a hard-edged two-color gradient clipped to the text, with
@@ -1111,7 +1073,7 @@ code {
 
 .mic-meter {
   height: 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
   overflow: hidden;
 }

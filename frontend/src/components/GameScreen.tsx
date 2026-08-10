@@ -262,11 +262,11 @@ function GameScreen() {
               <div className="pitch-readout">
                 <span className="pitch-readout-item">
                   <span className="pitch-readout-label">Target</span>
-                  <span className="pitch-readout-value">{indicatorDisplay.targetNoteName ?? '—'}</span>
+                  <span className="pitch-readout-value">{indicatorDisplay.targetNoteName ?? '-'}</span>
                 </span>
                 <span className="pitch-readout-item">
                   <span className="pitch-readout-label">You</span>
-                  <span className="pitch-readout-value">{indicatorDisplay.detectedNoteName ?? '—'}</span>
+                  <span className="pitch-readout-value">{indicatorDisplay.detectedNoteName ?? '-'}</span>
                 </span>
                 {indicatorDisplay.centsOff !== null && (
                   <span
@@ -311,7 +311,7 @@ function GameScreen() {
               <div className="debug-panel-row">
                 <span>raw</span>
                 <span>
-                  {indicatorDisplay.rawHz !== null ? `${indicatorDisplay.rawHz}Hz` : '—'}
+                  {indicatorDisplay.rawHz !== null ? `${indicatorDisplay.rawHz}Hz` : '-'}
                   {indicatorDisplay.rawClarity !== null ? ` · clarity ${indicatorDisplay.rawClarity}` : ''}
                   {indicatorDisplay.sampleAge !== null ? ` · age ${indicatorDisplay.sampleAge}s` : ''}
                 </span>

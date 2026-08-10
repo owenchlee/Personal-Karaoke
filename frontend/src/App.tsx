@@ -1,14 +1,13 @@
 import { useState } from 'react'
 import GameScreen from './components/GameScreen'
 import Sidebar from './components/Sidebar'
-import { MicWaveIcon, MenuIcon } from './components/icons'
+import { MenuIcon } from './components/icons'
 import ProofScreen from './screens/ProofScreen'
 import LoadSongScreen from './screens/LoadSongScreen'
 import CachedSongsScreen from './screens/CachedSongsScreen'
 import CalibrationScreen from './screens/CalibrationScreen'
 import RecordingsScreen from './screens/RecordingsScreen'
 import HighScoresScreen from './screens/HighScoresScreen'
-import AppearanceScreen from './screens/AppearanceScreen'
 import { BASE_URL, DEMO_MODE } from './config'
 
 // Screens that need a live job server -- meaningless on the static demo build. Sidebar already
@@ -30,7 +29,6 @@ function App() {
   else if (screen === 'calibrate') content = <CalibrationScreen />
   else if (screen === 'recordings') content = <RecordingsScreen />
   else if (screen === 'highscores') content = <HighScoresScreen />
-  else if (screen === 'appearance') content = <AppearanceScreen />
 
   return (
     <>
@@ -45,8 +43,10 @@ function App() {
             <MenuIcon />
           </button>
           <a className="brand" href={BASE_URL}>
-            <MicWaveIcon size={22} />
-            SingScore
+            <img className="brand-mark" src="/icon.png" alt="" width={28} height={28} />
+            <span>
+              Sing<span className="brand-score">Score</span>
+            </span>
           </a>
         </div>
         <a className="ghost-link" href={isProof ? BASE_URL : `${BASE_URL}?screen=proof`}>

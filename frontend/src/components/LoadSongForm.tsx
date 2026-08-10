@@ -146,12 +146,15 @@ function LoadSongForm({ onLoaded }: LoadSongFormProps) {
           {isBusy ? 'Processing…' : 'Load'}
         </button>
       </div>
+      <p className="muted form-hint">
+        Processing runs locally on this machine and isn't uploaded anywhere: use links you have the rights to.
+      </p>
 
       {gpuStatus && (
         <p className="gpu-status muted" role="status">
           {gpuStatus.available
-            ? `NVIDIA GPU detected${gpuStatus.name ? ` (${gpuStatus.name})` : ''} — processing will use it to speed things up`
-            : 'No NVIDIA GPU detected — processing will run on CPU'}
+            ? `NVIDIA GPU detected${gpuStatus.name ? ` (${gpuStatus.name})` : ''}: processing will use it to speed things up`
+            : 'No NVIDIA GPU detected: processing will run on CPU'}
         </p>
       )}
 

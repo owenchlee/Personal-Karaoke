@@ -3,20 +3,6 @@ interface IconProps {
   strokeWidth?: number
 }
 
-export function MicWaveIcon({ size = 20, strokeWidth = 2 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect x="9" y="2" width="6" height="12" rx="3" stroke="currentColor" strokeWidth={strokeWidth} />
-      <path
-        d="M5 11a7 7 0 0 0 14 0M12 18v4"
-        stroke="currentColor"
-        strokeWidth={strokeWidth}
-        strokeLinecap="round"
-      />
-    </svg>
-  )
-}
-
 export function MenuIcon({ size = 20, strokeWidth = 2 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">

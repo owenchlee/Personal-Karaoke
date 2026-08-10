@@ -100,7 +100,7 @@ export function useRecording({ audioRef, micStreamRef, songId }: UseRecordingOpt
       setDownloadFilename(filename)
       setStatus('done')
     } catch {
-      setErrorMessage("Couldn't render the MP3 — make sure scripts/server.py is running.")
+      setErrorMessage("Couldn't render the MP3. Make sure scripts/server.py is running.")
       setStatus('error')
     }
   }, [songId, revokeDownloadUrl])
@@ -165,7 +165,7 @@ export function useRecording({ audioRef, micStreamRef, songId }: UseRecordingOpt
     // status would stay stuck at 'recording' with no error message and no way forward but a page
     // reload. This is that safety net.
     const onEitherError = () => {
-      setErrorMessage('Recording failed — please try again.')
+      setErrorMessage('Recording failed. Please try again.')
       setStatus('error')
     }
     vocalRecorder.onerror = onEitherError
