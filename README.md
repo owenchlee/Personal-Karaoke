@@ -2,7 +2,7 @@
 
 Turn any song into a Rock Band-style karaoke game, for songs that don't have one.
 
-**[Try the live demo →](https://owenchlee.github.io/Personal-Karaoke/)** no install, no signup: pick a song and play. (A static build with a small curated set of songs; loading your own song from a link requires running the app locally, below.)
+*Demo video coming soon — for now, clone it and run it locally (below) to try it yourself.*
 
 <img src="https://img.shields.io/badge/React-19-149eca?logo=react&logoColor=white" alt="React 19"> <img src="https://img.shields.io/badge/TypeScript-3178c6?logo=typescript&logoColor=white" alt="TypeScript"> <img src="https://img.shields.io/badge/Python-3.11-3776ab?logo=python&logoColor=white" alt="Python 3.11"> <img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white" alt="FastAPI"> <img src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white" alt="PyTorch">
 
@@ -43,24 +43,28 @@ Everything after step 1 is cached per song, so replaying is instant and processi
 
 ## Running it locally
 
+**Requires:** Python 3.11, Node.js, and `ffmpeg` on your `PATH`.
+
 ```bash
-# Backend
+git clone https://github.com/owenchlee/Personal-Karaoke.git
+cd Personal-Karaoke
+
+# 1. Start the backend (leave this terminal running)
 py -3.11 -m venv venv
 venv/Scripts/python.exe -m pip install torch torchaudio
 venv/Scripts/python.exe -m pip install -r requirements.txt
 venv/Scripts/python.exe scripts/server.py
 
-# Frontend (separate terminal)
+# 2. In a second terminal, start the frontend
 cd frontend
 npm install
 npm run dev
 ```
 
-Requires Python 3.11, `ffmpeg` on `PATH`, and Node.js. An NVIDIA GPU is auto-detected and used
-for separation/transcription if present; otherwise everything falls back to CPU.
-
-From the app, paste a song link to process it end-to-end (~1.5-7 min depending on hardware), or
-pick from a library of already-processed songs for an instant replay.
+Open the URL the frontend prints (usually `http://localhost:5173`), paste a song link, and it
+processes end-to-end (~1.5-7 min depending on hardware) then drops you into the game. An NVIDIA
+GPU is auto-detected and used if present; otherwise everything falls back to CPU. Already-processed
+songs replay instantly from a local cache.
 
 See [`NOTES.md`](NOTES.md) for the full phase-by-phase design history and the reasoning behind
 specific tuning decisions.

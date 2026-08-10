@@ -1,15 +1,15 @@
 name: Deploy public demo
 
-# Builds the backend-free demo bundle (see "Public demo (static site)" in README.md) and
-# publishes it to GitHub Pages. Only frontend/public/demo-cache/ ships -- a small, git-tracked
-# set of songs the repo owner has cleared for public redistribution -- never the .gitignored
-# frontend/public/cache/ that accumulates whatever's been processed locally.
+# Builds the backend-free demo bundle (`npm run build:demo`, see frontend/.env.demo and
+# frontend/src/config.ts) and publishes it to GitHub Pages. Only frontend/public/demo-cache/
+# ships -- a small, git-tracked set of songs the repo owner has cleared for public
+# redistribution -- never the .gitignored frontend/public/cache/ that accumulates whatever's
+# been processed locally.
+#
+# Auto-deploy is disabled: the demo-cache catalog is currently empty (no vetted song), so
+# there's nothing worth publishing. Run manually via workflow_dispatch once a demo song/video
+# is ready.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'frontend/**'
-      - '.github/workflows/deploy-demo.yml'
   workflow_dispatch: {}
 
 permissions:
