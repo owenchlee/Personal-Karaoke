@@ -447,6 +447,85 @@ def _repair_energetic_gaps(
     return repaired
 
 
+def _find_overlong_word_runs(words: list[dict]) -> list[tuple[int, int]]:
+    """Return ``(start_idx, end_idx)`` index ranges (inclusive) of maximal runs of consecutive
+    ``words`` whose own force-aligned duration exceeds ``_MAX_PLAUSIBLE_WORD_DURATION_SECONDS``.
+
+    Forced alignment must assign every audio frame in the song to *some* target symbol (see
+    ``forced_alignment.align_tokens``'s own comment on why it now inserts a ``<star>`` wildcard
+    between every word); a run of overlong words is what's left over when even that isn't enough --
+    a stretch of real singing the source lyrics text just doesn't cover at all (as opposed to an
+    actual instrumental break, which the wildcard already absorbs cleanly into a genuine gap
+    between words, caught by ``_find_energetic_gaps`` instead). Measured directly on a real cached
+    song ("dhruv-double-take-lyrics") even after that wildcard fix: a two-word run ("but", "you")
+    still spanned 6-7s and 5s respectively, because the real audio there holds far more singing
+    (confirmed against the vocal stem's own continuous, non-silent RMS) than either word alone.
+    """
+    runs = []
+    start = None
+    for i, word in enumerate(words):
+        if word["end"] - word["start"] > _MAX_PLAUSIBLE_WORD_DURATION_SECONDS:
+            if start is None:
+                start = i
+        elif start is not None:
+            runs.append((start, i - 1))
+            start = None
+    if start is not None:
+        runs.append((start, len(words) - 1))
+    return runs
+
+
+def _repair_overlong_words(
+    model: WhisperModel,
+    audio,
+    sampling_rate: int,
+    language: str,
+    words: list[dict],
+    hotwords: str | None = None,
+) -> list[dict]:
+    """Replace each maximal run of overlong force-aligned words (``_find_overlong_word_runs``)
+    with a fresh re-transcription of that same stretch, rather than trusting timing already known
+    to be implausible. Falls back to leaving the original run in place if re-transcription finds
+    nothing usable there -- better to show known-correct (if mistimed) text than to silently
+    delete it.
+    """
+    runs = _find_overlong_word_runs(words)
+    if not runs:
+        return words
+
+    total_seconds = len(audio) / sampling_rate
+    result = list(words)
+    for start_idx, end_idx in reversed(runs):  # reverse: splicing a run doesn't shift earlier indices
+        region_start = words[start_idx]["start"]
+        region_end = words[end_idx]["end"]
+        pad_start = max(0.0, region_start - _GAP_REPAIR_PAD_SECONDS)
+        pad_end = min(total_seconds, region_end + _GAP_REPAIR_PAD_SECONDS)
+        clip = audio[int(pad_start * sampling_rate) : int(pad_end * sampling_rate)]
+        segments, _info = model.transcribe(
+            clip, language=language, word_timestamps=True, vad_filter=True,
+            condition_on_previous_text=False, hotwords=hotwords,
+        )
+        recovered = []
+        for word in _flatten_words(list(segments), hotwords=hotwords):
+            absolute_start = round(word["start"] + pad_start, 4)
+            absolute_end = round(word["end"] + pad_start, 4)
+            if absolute_end <= region_start - 0.5 or absolute_start >= region_end + 0.5:
+                continue  # outside the region -- re-detected padding context, not new
+            if absolute_end - absolute_start > _MAX_PLAUSIBLE_WORD_DURATION_SECONDS:
+                continue  # still implausible -- another hallucination artifact
+            recovered.append(
+                {
+                    "word": word["word"],
+                    "start": absolute_start,
+                    "end": absolute_end,
+                    "line": words[start_idx]["line"],
+                }
+            )
+        if recovered:
+            result[start_idx : end_idx + 1] = recovered
+    return result
+
+
 def _find_energetic_gaps(
     audio, sampling_rate: int, words: list[dict], background_ranges: list[tuple[float, float]]
 ) -> list[tuple[float, float]]:
@@ -487,9 +566,12 @@ def _repair_synced_lyrics_gaps(
     hotwords: str | None = None,
 ) -> list[dict]:
     """Fills real-singing gaps in lrclib-sourced ``words`` the same way ``_repair_energetic_gaps``
-    already does for local transcription. Only loads Whisper at all if a cheap, model-free RMS scan
-    (`_find_energetic_gaps`) finds at least one gap worth repairing, so a song whose lrclib lyrics
-    already cover the whole song -- the common case -- stays on the fast lookup-only path.
+    already does for local transcription, and additionally repairs any overlong force-aligned word
+    (``_repair_overlong_words`` -- a stretch of real singing the source text doesn't cover at all,
+    left over even after ``forced_alignment.align_tokens``'s own per-word wildcard). Only loads
+    Whisper at all if a cheap, model-free scan finds at least one of either worth repairing, so a
+    song whose lrclib lyrics already cover the whole song -- the common case -- stays on the fast
+    lookup-only path.
     """
     if not words:
         return words
@@ -497,7 +579,8 @@ def _repair_synced_lyrics_gaps(
     audio, sampling_rate = sf.read(vocal_stem_path)
     if audio.ndim > 1:
         audio = audio.mean(axis=1)
-    if not _find_energetic_gaps(audio, sampling_rate, words, background_ranges):
+    overlong_runs = _find_overlong_word_runs(words)
+    if not overlong_runs and not _find_energetic_gaps(audio, sampling_rate, words, background_ranges):
         return words
 
     device = get_device()
@@ -507,6 +590,11 @@ def _repair_synced_lyrics_gaps(
         str(vocal_stem_path), sampling_rate=model.feature_extractor.sampling_rate
     )
     resolved_language = language or _detect_language(model, model_audio)
+    if overlong_runs:
+        words = _repair_overlong_words(
+            model, model_audio, model.feature_extractor.sampling_rate, resolved_language, words,
+            hotwords=hotwords,
+        )
     return _repair_energetic_gaps(
         model, model_audio, model.feature_extractor.sampling_rate, resolved_language, words,
         hotwords=hotwords,

@@ -1584,3 +1584,62 @@ this song already relied on once its lyric timeline starts in the right place. R
 this bug only reproduces for a title carrying this specific glued-tag pattern; a targeted rerun of
 `--all` would be the way to sweep every cached song if more turn out to be affected, not done here
 since it wasn't reported for any other song.
+
+## Lyrics timing still badly wrong even on the highest-quality separation model (recorded 2026-08-10)
+
+Reported: `dhruv-double-take-lyrics` lyrics timing very bad, even reprocessed with the slowest/
+highest-quality separation model (`bs_roformer`, confirmed via `meta.json`'s `separation_model`) --
+ruling out separation quality as the cause before looking further.
+
+**Root cause (measured directly against the real cached `lyrics.json`, not guessed)**: individual
+words with grossly implausible durations, e.g. "but" spanning 7.6s and the very next word "you"
+spanning 10.1s (113.18-130.86s combined) -- roughly 20-40x a normal sung word. This traces to
+`forced_alignment.align_tokens`: CTC forced alignment must assign *every* audio frame to some
+target symbol in the given token sequence, and the only "wildcard" available to absorb audio that
+doesn't match any of the given words was a single `<star>` pair at the very start/end of the whole
+song (added when forced alignment first replaced lrclib's own line-level timing -- see "Lyrics
+timing: replaced with CTC forced alignment" above). A stretch mid-song that the source lyrics text
+just doesn't cover -- confirmed by checking the vocal stem's own RMS through 110-130s, continuously
+non-silent (0.09-0.11, in line with the song's singing elsewhere, not an instrumental gap) -- has
+nothing nearby to absorb it, so it gets smeared into whichever real word sits next to it instead.
+Tried a `<star>` at every *line* boundary first (a smaller change); measured that it wasn't enough
+by itself -- the extra content sits *inside* what was expected to be a single short line, not
+between two lines, so a line-level wildcard never gets a chance to catch it.
+
+**Fix, two parts**:
+1. `forced_alignment.align_tokens` now inserts a `<star>` wildcard between *every* word (matching
+   `ctc-forced-aligner`'s own `star_frequency="segment"` mode, previously not used here -- see the
+   module's own updated comments). Verified this alone converts most of the failure from "smeared
+   into a word's own duration" into a clean, empty *gap* between two words instead -- a shape
+   `lyrics_extraction._repair_synced_lyrics_gaps`'s existing Whisper-based gap-repair pass already
+   knows how to fill in, rather than a new failure mode needing new code.
+2. New `_find_overlong_word_runs`/`_repair_overlong_words` in `lyrics_extraction.py`, wired into
+   `_repair_synced_lyrics_gaps`: a safety net for whatever the per-word wildcard still can't place
+   correctly (measured: it wasn't quite enough on its own for this song's worst two-word run).
+   Finds maximal runs of consecutive words whose own force-aligned duration still exceeds the
+   already-established `_MAX_PLAUSIBLE_WORD_DURATION_SECONDS` (3.0s -- the same cap
+   `_repair_energetic_gaps` already uses to reject implausible *recovered* words), re-transcribes
+   that padded stretch fresh via Whisper, and replaces the run with whatever it finds -- falling
+   back to leaving the original (mistimed but at least present) words untouched if nothing usable
+   comes back. Runs before the existing gap-repair pass in `_repair_synced_lyrics_gaps`, since
+   replacing an overlong run can itself reveal a genuine leftover gap for that pass to catch.
+
+**Verified**: 8 new unit tests (`tests/test_lyrics_extraction.py`: `_find_overlong_word_runs`
+finding a single word / merging a consecutive run / finding nothing when all words are plausible;
+`_repair_overlong_words` replacing a run, leaving it untouched when nothing's recovered, rejecting
+a still-implausible recovery; `_repair_synced_lyrics_gaps` wiring). 217 Python tests pass total.
+Re-ran `extract_lyrics()` directly against the real cached `dhruv-double-take-lyrics` vocal stem:
+zero words left with duration over 2.5s (down from several, the worst at 10.1s), and the
+previously-blank stretch turned out to be a real repeated chorus ("Boy, you got me hooked onto
+something / Who could say that they saw us coming? / Tell me, do you feel that love?") the fetched
+lrclib text was simply missing -- now filled in with plausible per-word timing (0.1-1.5s each) via
+the same Whisper re-transcription this fix wires in. One smaller residual noticed but not chased
+further (a ~0.3s overlap where recovered words meet the next original line's words, and one
+low-energy ~8s stretch around 71-79s that the repair pass tried and failed to recover anything
+for, left as an unfilled gap) -- neither is the "words holding for 10+ seconds" failure that was
+reported, and both are within this pipeline's already-documented "not perfect" tolerance elsewhere
+in this file. Updated `cache/dhruv-double-take-lyrics/lyrics.json` and republished via
+`scripts/publish_song.py dhruv-double-take-lyrics`. Not re-applied to any other cached song -- this
+class of bug isn't title-specific like the FLAC one above, so any synced-lyrics-sourced song could
+in principle be affected, but a bulk `reprocess_from_vocals.py --all` sweep wasn't done here since
+only this one song was reported.

@@ -48,3 +48,5 @@ def test_align_tokens_rejects_an_unsupported_language(tmp_path):
 
     with pytest.raises(ValueError, match="Unsupported language"):
         align_tokens(["hi"], vocal_path, "fr")
+
+

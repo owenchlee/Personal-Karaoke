@@ -18,11 +18,13 @@ from faster_whisper.transcribe import Segment, Word
 from audio_pipeline.lyrics_extraction import (
     _detect_language,
     _find_energetic_gaps,
+    _find_overlong_word_runs,
     _flatten_words,
     _force_align_synced_lyrics,
     _interpolate_background_range,
     _language_of_words,
     _repair_energetic_gaps,
+    _repair_overlong_words,
     _repair_synced_lyrics_gaps,
     _transcribe_chunked,
     extract_lyrics,
@@ -424,6 +426,92 @@ def test_find_energetic_gaps_ignores_a_gap_that_overlaps_a_background_vocal_rang
     ) == []
 
 
+def test_find_overlong_word_runs_finds_a_single_overlong_word():
+    words = [
+        {"word": "you", "start": 0.0, "end": 1.0, "line": 0},
+        {"word": "but", "start": 1.0, "end": 8.0, "line": 0},  # 7s -- way past the plausible cap
+        {"word": "me", "start": 8.0, "end": 8.5, "line": 0},
+    ]
+
+    assert _find_overlong_word_runs(words) == [(1, 1)]
+
+
+def test_find_overlong_word_runs_merges_a_consecutive_run():
+    # Reproduces the measured real case: two adjacent words ("but", "you") both overlong with no
+    # gap between them, since the excess singing that's missing from the source text doesn't know
+    # to land on just one of them.
+    words = [
+        {"word": "nobody", "start": 0.0, "end": 1.0, "line": 0},
+        {"word": "but", "start": 1.0, "end": 8.0, "line": 0},
+        {"word": "you", "start": 8.0, "end": 15.0, "line": 0},
+        {"word": "Boy", "start": 15.0, "end": 15.5, "line": 1},
+    ]
+
+    assert _find_overlong_word_runs(words) == [(1, 2)]
+
+
+def test_find_overlong_word_runs_finds_nothing_when_every_word_is_plausible():
+    words = [
+        {"word": "you", "start": 0.0, "end": 1.0, "line": 0},
+        {"word": "wont", "start": 1.0, "end": 2.0, "line": 0},
+    ]
+
+    assert _find_overlong_word_runs(words) == []
+
+
+def test_repair_overlong_words_replaces_an_overlong_run_with_a_fresh_transcription():
+    words = [
+        {"word": "nobody", "start": 0.0, "end": 1.0, "line": 3},
+        {"word": "but", "start": 1.0, "end": 8.0, "line": 3},
+        {"word": "you", "start": 8.0, "end": 15.0, "line": 3},
+        {"word": "Boy", "start": 15.0, "end": 15.5, "line": 4},
+    ]
+    audio = np.zeros(20)
+    # Run spans [1.0, 15.0); pad_start = max(0, 1.0 - _GAP_REPAIR_PAD_SECONDS(3.0)) = 0.0, so the
+    # re-transcription's own raw timestamps carry straight through unchanged as absolute ones.
+    model = _FakeTranscribeModel(
+        [[_segment([_word(" but", 1.2, 1.6), _word(" you", 1.6, 2.0), _word(" but", 2.5, 2.9), _word(" you", 2.9, 3.3)])]]
+    )
+
+    result = _repair_overlong_words(model, audio=audio, sampling_rate=1, language="en", words=words)
+
+    assert result == [
+        {"word": "nobody", "start": 0.0, "end": 1.0, "line": 3},
+        {"word": "but", "start": 1.2, "end": 1.6, "line": 3},
+        {"word": "you", "start": 1.6, "end": 2.0, "line": 3},
+        {"word": "but", "start": 2.5, "end": 2.9, "line": 3},
+        {"word": "you", "start": 2.9, "end": 3.3, "line": 3},
+        {"word": "Boy", "start": 15.0, "end": 15.5, "line": 4},
+    ]
+
+
+def test_repair_overlong_words_leaves_the_run_untouched_when_nothing_is_recovered():
+    words = [
+        {"word": "nobody", "start": 0.0, "end": 1.0, "line": 3},
+        {"word": "but", "start": 1.0, "end": 8.0, "line": 3},
+        {"word": "you", "start": 8.0, "end": 15.0, "line": 3},
+    ]
+    audio = np.zeros(20)
+    model = _FakeTranscribeModel([[]])  # nothing transcribed in the re-attempt
+
+    result = _repair_overlong_words(model, audio=audio, sampling_rate=1, language="en", words=words)
+
+    assert result == words
+
+
+def test_repair_overlong_words_rejects_a_still_implausible_recovered_word():
+    words = [
+        {"word": "nobody", "start": 0.0, "end": 1.0, "line": 3},
+        {"word": "but", "start": 1.0, "end": 8.0, "line": 3},
+    ]
+    audio = np.zeros(20)
+    model = _FakeTranscribeModel([[_segment([_word(" garbled", 2.0, 6.5)])]])  # 4.5s -- implausible
+
+    result = _repair_overlong_words(model, audio=audio, sampling_rate=1, language="en", words=words)
+
+    assert result == words
+
+
 class _FakeRepairModel:
     """Stands in for WhisperModel in `_repair_synced_lyrics_gaps` -- exposes just the
     `feature_extractor.sampling_rate` attribute and `transcribe` method that function needs,
@@ -485,6 +573,36 @@ def test_repair_synced_lyrics_gaps_recovers_a_real_singing_gap_lrclib_missed(tmp
         {"word": "wont", "start": 10.0, "end": 11.0, "line": 3},
     ]
     assert len(fake_model.calls) == 1
+
+
+def test_repair_synced_lyrics_gaps_recovers_an_overlong_force_aligned_word(tmp_path):
+    # Reproduces the other measured real-world case (see `_find_overlong_word_runs`): the words
+    # are contiguous (no gap for `_find_energetic_gaps` to catch), but one word's own force-aligned
+    # duration is implausible -- a stretch of real singing the source text doesn't cover at all,
+    # smeared into that one word instead of left as a gap.
+    vocal_path = tmp_path / "vocals.wav"
+    _write_wav_with_tone_span(vocal_path, total_s=15.0, tone_start_s=0.0, tone_end_s=15.0)
+    words = [
+        {"word": "nobody", "start": 0.0, "end": 1.0, "line": 3},
+        {"word": "but", "start": 1.0, "end": 8.0, "line": 3},  # 7s -- way past plausible
+        {"word": "you", "start": 8.0, "end": 8.5, "line": 3},
+    ]
+    # Two calls: the overlong-word repair pass, then `_repair_energetic_gaps` re-scanning the
+    # *updated* word list -- it now sees a real energetic gap between "then" and "you" that didn't
+    # exist before ("but" used to span all the way to 8.0), and (told nothing new is there) leaves
+    # it alone.
+    fake_model = _FakeRepairModel([[_segment([_word(" but", 1.2, 1.6), _word(" then", 1.6, 2.0)])], []])
+
+    with patch("audio_pipeline.lyrics_extraction.WhisperModel", return_value=fake_model):
+        result = _repair_synced_lyrics_gaps(words, [], vocal_path, language="en")
+
+    assert result == [
+        {"word": "nobody", "start": 0.0, "end": 1.0, "line": 3},
+        {"word": "but", "start": 1.2, "end": 1.6, "line": 3},
+        {"word": "then", "start": 1.6, "end": 2.0, "line": 3},
+        {"word": "you", "start": 8.0, "end": 8.5, "line": 3},
+    ]
+    assert len(fake_model.calls) == 2
 
 
 def _write_synthetic_wav(path, duration_s=2.0, samplerate=16000, freq_hz=220.0):

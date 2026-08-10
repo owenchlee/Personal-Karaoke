@@ -107,9 +107,9 @@ def _generate_emissions(model, audio_waveform: torch.Tensor) -> tuple[torch.Tens
         emissions = emissions[: -(extension // ratio)]
 
     emissions = torch.log_softmax(emissions, dim=-1)
-    # A <star> column, matching preprocess's <star> tokens -- required by the
-    # alignment vocabulary even though this project never actually uses
-    # star_frequency="segment" wildcards between every word.
+    # A <star> column, matching preprocess's <star> tokens -- required by the alignment
+    # vocabulary. align_tokens inserts one between every word (ctc-forced-aligner's own
+    # star_frequency="segment") -- see its own comment for why.
     emissions = torch.cat([emissions, torch.zeros(emissions.size(0), 1, device=emissions.device)], dim=1)
     stride_ms = ratio * 1000 / _SAMPLING_FREQ
     return emissions, stride_ms
@@ -251,15 +251,35 @@ def align_tokens(tokens: list[str], audio_path: str | Path, language: str) -> li
     audio_waveform = _load_audio(str(audio_path), model.dtype, device)
     emissions, stride_ms = _generate_emissions(model, audio_waveform)
 
-    # A leading/trailing <star> "wildcard" token is required, not cosmetic: it gives the CTC
-    # decoder a symbol that can absorb the instrumental intro/outro (and any other stretch that
-    # isn't literally one of these words) without forcing the very first/last real word to
-    # stretch to cover it -- dropping it (tried first) produced badly wrong spans, e.g. the first
-    # word absorbing 30+ seconds of lead-in silence, confirmed directly against a real cached
-    # vocal stem.
-    romanized_starred = ["<star>"] + _romanize(tokens, iso_language) + ["<star>"]
-    segments, blank_label = _align(emissions, romanized_starred, tokenizer)
-    spans = _spans_per_token(romanized_starred, segments, blank_label)[1:-1]
+    # A <star> "wildcard" token between every word (not just at the very start/end of the whole
+    # song), matching ctc-forced-aligner's own star_frequency="segment" mode -- required, not
+    # cosmetic. forced_align must assign every audio frame to *some* target symbol; with only a
+    # leading/trailing pair of stars (tried first, and still an improvement over none at all -- the
+    # very first version of this had the first word absorbing 30+ seconds of lead-in silence), any
+    # stretch of real singing *inside* the song that these tokens don't cover -- an instrumental
+    # break, or a passage the source lyrics text just doesn't have -- still has nothing nearby to
+    # absorb it, and gets smeared into whichever word sits next to it instead. Measured directly on
+    # a real cached song ("dhruv-double-take-lyrics"): a stretch like this produced one word ("but")
+    # spanning 7.6s and the next ("you") spanning 10.1s, each roughly 20x a normal sung word's
+    # length -- and this didn't fully go away even with a wildcard at every *line* boundary, tried
+    # first: the vocal-stem RMS around 110-130s of that song stays continuously non-silent
+    # (0.09-0.11, in line with the song's own singing elsewhere), so the extra content sits inside
+    # what was expected to be a single short line, not between two lines. A wildcard between every
+    # word gives the decoder somewhere to put it regardless of where inside the song it falls;
+    # `lyrics_extraction._repair_synced_lyrics_gaps`'s overlong-word repair pass (see its own
+    # comment) is the remaining safety net for whatever's still left over even after this.
+    romanized = _romanize(tokens, iso_language)
+    starred: list[str] = ["<star>"]
+    is_star = [True]
+    for token in romanized:
+        starred.append(token)
+        is_star.append(False)
+        starred.append("<star>")
+        is_star.append(True)
+
+    segments, blank_label = _align(emissions, starred, tokenizer)
+    spans_all = _spans_per_token(starred, segments, blank_label)
+    spans = [span for span, star in zip(spans_all, is_star) if not star]
 
     if len(spans) != len(tokens):
         raise RuntimeError(
