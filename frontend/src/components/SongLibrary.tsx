@@ -1,15 +1,13 @@
 import { useEffect, useState } from 'react'
 import { formatProcessedAt, sortSongLibrary } from '../game/songLibrary'
 import { findBestScore } from '../game/scores'
-import { CACHE_BASE, DEMO_MODE } from '../config'
+import { DEMO_MODE, SONGS_URL } from '../config'
 import type { Song } from '../types/song'
 import type { ScoreRecord } from '../types/score'
 import { StarIcon, TrashIcon } from './icons'
 
-// The static demo build has no job server behind it, so the library is read from a manifest
-// baked into the build (see scripts/generate_demo_manifest.py) instead of the live API, and
-// star/delete -- which mutate state on a server that doesn't exist here -- are hidden.
-const SONGS_URL = DEMO_MODE ? `${CACHE_BASE}/manifest.json` : '/api/songs'
+// star/delete mutate state on a job server that doesn't exist on the static demo build, so
+// they're hidden there -- see DEMO_MODE handling in config.ts.
 
 interface SongLibraryProps {
   onSelect: (slug: string) => void

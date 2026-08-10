@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from audio_pipeline.device import get_device_info  # noqa: E402
 from audio_pipeline.download import download_audio, probe_title  # noqa: E402
+from audio_pipeline.lyrics_lookup import clean_display_title  # noqa: E402
 from audio_pipeline.mastering import master_recording  # noqa: E402
 from audio_pipeline.pipeline import is_cached, process_song, slugify  # noqa: E402
 from audio_pipeline.transcode import transcode_to_mp3  # noqa: E402
@@ -278,7 +279,7 @@ def list_songs() -> dict:
             meta_path = CACHE_DIR / entry.name / "meta.json"
             if meta_path.exists():
                 meta = json.loads(meta_path.read_text())
-                title = meta.get("title") or entry.name
+                title = clean_display_title(meta["title"]) if meta.get("title") else entry.name
                 processed_at = meta.get("processed_at")
                 starred = bool(meta.get("starred", False))
             songs.append({
@@ -339,7 +340,7 @@ def _recording_title(slug: str) -> str:
     if meta_path.exists():
         meta = json.loads(meta_path.read_text())
         if meta.get("title"):
-            return meta["title"]
+            return clean_display_title(meta["title"])
     return slug
 
 

@@ -11,7 +11,8 @@ import { useMicPitch } from '../hooks/useMicPitch'
 import { useRecording } from '../hooks/useRecording'
 import { useScoring } from '../hooks/useScoring'
 import type { ScoreSubmissionResult } from '../types/score'
-import { BASE_URL, CACHE_BASE, DEMO_MODE } from '../config'
+import type { Song } from '../types/song'
+import { BASE_URL, CACHE_BASE, DEMO_MODE, SONGS_URL } from '../config'
 
 function getSongId(): string | null {
   return new URLSearchParams(window.location.search).get('song')
@@ -47,6 +48,7 @@ const RECENT_NOTES_COUNT = 3
 
 function GameScreen() {
   const [songId] = useState(getSongId)
+  const [songTitle, setSongTitle] = useState<string | null>(null)
   const [notes, setNotes] = useState<NoteEvent[]>([])
   const [lyrics, setLyrics] = useState<LyricWord[]>([])
   const [loadState, setLoadState] = useState<LoadState>('loading')
@@ -95,6 +97,25 @@ function GameScreen() {
       .catch(() => {
         if (cancelled) return
         setLoadState('error')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [songId])
+
+  useEffect(() => {
+    if (songId === null) return
+
+    let cancelled = false
+    fetchJson<{ songs: Song[] }>(SONGS_URL)
+      .then(({ songs }) => {
+        if (cancelled) return
+        const match = songs.find((song) => song.slug === songId)
+        if (match) setSongTitle(match.title)
+      })
+      .catch(() => {
+        // Falls back to the raw slug in the heading below -- not worth surfacing an error for.
       })
 
     return () => {
@@ -194,7 +215,7 @@ function GameScreen() {
         <section className="panel player-panel">
           <div className="player-head">
             <div className="player-head-row">
-              <h2>{songId}</h2>
+              <h2>{songTitle ?? songId}</h2>
               <div className="mic-controls">
                 {micStatus === 'idle' && (
                   <button type="button" className="btn btn-secondary" onClick={() => void startMic()}>

@@ -16,3 +16,8 @@ export const BASE_URL = import.meta.env.BASE_URL
  * because it accumulates whatever a local user has processed (frequently copyrighted tracks not
  * safe to publish). See scripts/generate_demo_manifest.py. */
 export const CACHE_BASE = `${BASE_URL}${DEMO_MODE ? 'demo-cache' : 'cache'}`
+
+/** Where the "cached songs" list (slug/title/processed_at/starred) is read from -- the static
+ * demo build has no job server behind it, so it reads a manifest baked into the build (see
+ * scripts/generate_demo_manifest.py) instead of the live API. */
+export const SONGS_URL = DEMO_MODE ? `${CACHE_BASE}/manifest.json` : '/api/songs'

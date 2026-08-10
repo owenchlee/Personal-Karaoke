@@ -19,7 +19,12 @@ Usage:
 """
 import argparse
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from audio_pipeline.lyrics_lookup import clean_display_title  # noqa: E402
 
 
 def generate_demo_manifest(cache_dir: Path, public_dir: Path) -> dict:
@@ -33,7 +38,7 @@ def generate_demo_manifest(cache_dir: Path, public_dir: Path) -> dict:
             meta_path = cache_dir / entry.name / "meta.json"
             if meta_path.exists():
                 meta = json.loads(meta_path.read_text())
-                title = meta.get("title") or entry.name
+                title = clean_display_title(meta["title"]) if meta.get("title") else entry.name
                 processed_at = meta.get("processed_at")
             songs.append({
                 "slug": entry.name,

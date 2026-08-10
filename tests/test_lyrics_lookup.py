@@ -13,6 +13,7 @@ from audio_pipeline.lyrics_lookup import (
     _pick_best_synced_lyrics,
     _tokenize_line,
     _words_from_lrc,
+    clean_display_title,
     fetch_synced_lyrics,
 )
 
@@ -169,6 +170,23 @@ def test_parse_title_bare_noise_stripping_does_not_eat_a_real_short_word():
     # A real bare title word must not be dropped just because a noise keyword is a substring of it
     # somewhere in the middle -- only an exact/prefix/suffix match counts as noise.
     assert _parse_title("Redheaded Stranger") == ("Redheaded Stranger", None)
+
+
+def test_clean_display_title_strips_bracket_noise_and_emoji_but_keeps_the_dash():
+    # Unlike _parse_title, display cleaning must never split/reorder on the dash.
+    assert clean_display_title("Love In The Dark - Adele (Lyrics) \U0001F3B5") == "Love In The Dark - Adele"
+
+
+def test_clean_display_title_strips_bare_noise_tags_glued_onto_cjk_words():
+    assert clean_display_title("陳慧嫻 夜機 無損音樂FLAC 歌詞LYRICS 純享") == "陳慧嫻 夜機"
+
+
+def test_clean_display_title_keeps_a_real_title_parenthetical():
+    assert clean_display_title("Sign of the Times (Interlude)") == "Sign of the Times (Interlude)"
+
+
+def test_clean_display_title_falls_back_to_the_raw_title_when_cleaning_empties_it():
+    assert clean_display_title("(Official Video)") == "(Official Video)"
 
 
 def test_fetch_synced_lyrics_uses_structured_search_when_an_artist_is_present():

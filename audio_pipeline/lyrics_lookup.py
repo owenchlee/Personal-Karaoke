@@ -51,6 +51,16 @@ _DASH_SPLIT_RE = re.compile(r"\s+[-–—－]\s+")
 # A trailing "feat./ft./featuring ..." run that wasn't already inside brackets.
 _FEAT_RE = re.compile(r"\s+(?:feat|ft|featuring)\.?\s+.*$", re.IGNORECASE)
 _SURROUNDING_QUOTES = " \t\"'“”‘’「」『』"
+# Emoji/pictograph noise (e.g. a trailing "\U0001F3B5") that uploaders tack onto a title --
+# never meaningful title text, safe to strip unconditionally rather than gated on keywords.
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F300-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "\U0001F1E6-\U0001F1FF"
+    "️"
+    "]+"
+)
 
 
 def _strip_noise_brackets(text: str) -> str:
@@ -123,6 +133,19 @@ def clean_hotword_text(raw_query: str) -> str:
     """
     track, artist = _parse_title(raw_query)
     return f"{artist} {track}" if artist else track
+
+
+def clean_display_title(raw_title: str) -> str:
+    """Strip promotional noise -- bracketed tags, glued noise tokens (see
+    ``_strip_noise_tokens``), emoji -- from a raw source title for display in the song
+    library, e.g. "Love In The Dark - Adele (Lyrics) \U0001F3B5" -> "Love In The Dark - Adele".
+    Unlike ``_parse_title``/``clean_hotword_text``, this never splits or reorders on the
+    dash: an "Artist - Title" or "Title - Artist" structure is left exactly as found.
+    """
+    cleaned = _strip_noise_tokens(_strip_noise_brackets(raw_title))
+    cleaned = _EMOJI_RE.sub("", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip().strip(_SURROUNDING_QUOTES + "-–—－")
+    return cleaned or raw_title.strip()
 
 
 # lrclib only tells us when a line *starts*; naively treating "the next
