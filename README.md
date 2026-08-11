@@ -2,7 +2,7 @@
 
 Turn any song into a Rock Band-style karaoke game, for songs that don't have one.
 
-https://github.com/owenchlee/Personal-Karaoke/raw/main/demo_video/karaoke-demo.mp4
+https://github.com/user-attachments/assets/74861713-e127-454f-85d6-64b56c7654c9
 
 *Clone it and run it locally (below) to try it yourself.*
 
