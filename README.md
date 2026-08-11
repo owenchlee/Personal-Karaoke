@@ -2,7 +2,9 @@
 
 Turn any song into a Rock Band-style karaoke game, for songs that don't have one.
 
-*Demo video coming soon — for now, clone it and run it locally (below) to try it yourself.*
+https://github.com/owenchlee/Personal-Karaoke/raw/main/demo_video/karaoke-demo.mp4
+
+*Clone it and run it locally (below) to try it yourself.*
 
 <img src="https://img.shields.io/badge/React-19-149eca?logo=react&logoColor=white" alt="React 19"> <img src="https://img.shields.io/badge/TypeScript-3178c6?logo=typescript&logoColor=white" alt="TypeScript"> <img src="https://img.shields.io/badge/Python-3.11-3776ab?logo=python&logoColor=white" alt="Python 3.11"> <img src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white" alt="FastAPI"> <img src="https://img.shields.io/badge/PyTorch-ee4c2c?logo=pytorch&logoColor=white" alt="PyTorch">
 

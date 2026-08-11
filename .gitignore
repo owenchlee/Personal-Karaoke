@@ -20,6 +20,7 @@ scores/
 *.mp4
 !tests/fixtures/**
 !frontend/public/*.wav
+!demo_video/karaoke-demo.mp4
 
 # Public demo song assets (frontend/public/demo-cache/) are checked in on purpose, unlike the
 # personal library above -- only put songs here you have the rights to redistribute publicly.
