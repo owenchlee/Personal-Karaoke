@@ -1040,6 +1040,14 @@ code {
   border-bottom: 2px solid var(--accent);
 }
 
+/* Instrumental breaks (intro, solo, bridge, outro) render as a run of these note glyphs instead
+   of real words -- see withInstrumentalBreaks in game/lyrics.ts. They're plain LyricWords under
+   the hood, so the same active/sung/--progress fill mechanic below lights them up one by one,
+   giving a sense of how long the music-only stretch lasts without a separate UI. */
+.lyric-word--instrumental {
+  font-size: 1.15em;
+}
+
 /* Karaoke fill: a hard-edged two-color gradient clipped to the text, with
    the split point driven by --progress (0%-100%, updated every animation
    frame from the audio's currentTime -- see LyricsDisplay.tsx). Below the

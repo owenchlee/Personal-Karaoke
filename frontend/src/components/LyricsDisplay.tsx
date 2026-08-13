@@ -1,6 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RefObject } from 'react'
-import { getCurrentLineIndex, getCurrentWordIndex, getWordProgress, groupWordsByLine } from '../game/lyrics'
+import {
+  getCurrentLineIndex,
+  getCurrentWordIndex,
+  getWordProgress,
+  groupWordsByLine,
+  mergeSingleWordLines,
+  withInstrumentalBreaks,
+} from '../game/lyrics'
+import type { DisplayWord } from '../game/lyrics'
 import type { LyricWord } from '../types/lyrics'
 
 interface LyricsDisplayProps {
@@ -11,12 +19,16 @@ interface LyricsDisplayProps {
 const ACTIVE_CLASS = 'lyric-word--active'
 const SUNG_CLASS = 'lyric-word--sung'
 
-function LyricsLine({ words, role }: { words: LyricWord[] | undefined; role: 'prev' | 'current' | 'next' }) {
+function LyricsLine({ words, role }: { words: DisplayWord[] | undefined; role: 'prev' | 'current' | 'next' }) {
   return (
     <div className={`lyric-line lyric-line--${role}`}>
       {words
         ? words.map((word) => (
-            <span key={word.start} data-word-start={word.start} className="lyric-word">
+            <span
+              key={word.start}
+              data-word-start={word.start}
+              className={`lyric-word${word.isInstrumental ? ' lyric-word--instrumental' : ''}`}
+            >
               <span className="lyric-word__fill">{word.word}</span>
             </span>
           ))
@@ -26,7 +38,8 @@ function LyricsLine({ words, role }: { words: LyricWord[] | undefined; role: 'pr
 }
 
 function LyricsDisplay({ audioRef, words }: LyricsDisplayProps) {
-  const lines = useMemo(() => groupWordsByLine(words), [words])
+  const displayWords = useMemo(() => withInstrumentalBreaks(mergeSingleWordLines(words)), [words])
+  const lines = useMemo(() => groupWordsByLine(displayWords), [displayWords])
   const [currentLineIndex, setCurrentLineIndex] = useState(0)
   // All three visible lines' spans live under this one wrapper, so looking
   // up the active word here works even in the same tick that the line
@@ -42,15 +55,15 @@ function LyricsDisplay({ audioRef, words }: LyricsDisplayProps) {
 
     const tick = () => {
       const currentTime = audioRef.current?.currentTime ?? 0
-      const wordIndex = getCurrentWordIndex(words, currentTime)
+      const wordIndex = getCurrentWordIndex(displayWords, currentTime)
       if (wordIndex !== activeWordIndexRef.current) {
         activeElRef.current = null
         activeFillElRef.current = null
 
-        const lineIndex = getCurrentLineIndex(words, currentTime)
+        const lineIndex = getCurrentLineIndex(displayWords, currentTime)
         setCurrentLineIndex((previous) => (previous === lineIndex ? previous : lineIndex))
 
-        const activeWord = wordIndex === -1 ? undefined : words[wordIndex]
+        const activeWord = wordIndex === -1 ? undefined : displayWords[wordIndex]
         // Re-tag every visible word rather than just the one word that
         // changed, so seeking backward (which can move the active word
         // earlier than words already marked "sung") corrects itself instead
@@ -72,7 +85,7 @@ function LyricsDisplay({ audioRef, words }: LyricsDisplayProps) {
       }
 
       if (activeFillElRef.current && activeWordIndexRef.current !== -1) {
-        const activeWord = words[activeWordIndexRef.current]
+        const activeWord = displayWords[activeWordIndexRef.current]
         const progress = getWordProgress(activeWord, currentTime)
         activeFillElRef.current.style.setProperty('--progress', `${(progress * 100).toFixed(2)}%`)
       }
@@ -82,7 +95,7 @@ function LyricsDisplay({ audioRef, words }: LyricsDisplayProps) {
     rafId = requestAnimationFrame(tick)
 
     return () => cancelAnimationFrame(rafId)
-  }, [audioRef, words])
+  }, [audioRef, displayWords])
 
   return (
     <div ref={wrapperRef} className="lyrics-display">
