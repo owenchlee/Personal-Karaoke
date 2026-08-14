@@ -8,13 +8,16 @@ import CachedSongsScreen from './screens/CachedSongsScreen'
 import CalibrationScreen from './screens/CalibrationScreen'
 import RecordingsScreen from './screens/RecordingsScreen'
 import HighScoresScreen from './screens/HighScoresScreen'
+import VoiceRangeScreen from './screens/VoiceRangeScreen'
 import { BASE_URL, DEMO_MODE } from './config'
 
 // Screens that need a live job server -- meaningless on the static demo build. Sidebar already
 // omits their nav links, but this also blocks reaching them directly via a typed/bookmarked
 // `?screen=` URL, which would otherwise render a form that fires real fetches against a backend
-// that doesn't exist on GitHub Pages.
-const DEMO_ONLY_SCREENS = new Set(['load', 'recordings', 'highscores'])
+// that doesn't exist on GitHub Pages. 'voicerange' is included here even though saving a range is
+// pure localStorage -- it's the *transpose* endpoint (GameScreen) that actually needs the job
+// server, so on the demo build a saved range would just never do anything.
+const DEMO_ONLY_SCREENS = new Set(['load', 'recordings', 'highscores', 'voicerange'])
 
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -29,6 +32,7 @@ function App() {
   else if (screen === 'calibrate') content = <CalibrationScreen />
   else if (screen === 'recordings') content = <RecordingsScreen />
   else if (screen === 'highscores') content = <HighScoresScreen />
+  else if (screen === 'voicerange') content = <VoiceRangeScreen />
 
   return (
     <>

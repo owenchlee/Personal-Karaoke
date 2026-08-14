@@ -30,7 +30,7 @@ from typing import Literal
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -41,6 +41,7 @@ from audio_pipeline.lyrics_lookup import clean_display_title  # noqa: E402
 from audio_pipeline.mastering import master_recording  # noqa: E402
 from audio_pipeline.pipeline import is_cached, process_song, slugify  # noqa: E402
 from audio_pipeline.transcode import transcode_to_mp3  # noqa: E402
+from audio_pipeline.transpose import transpose_song  # noqa: E402
 from publish_song import publish_song  # noqa: E402
 
 CACHE_DIR = Path("cache")
@@ -218,6 +219,15 @@ class SetStarredRequest(BaseModel):
     starred: bool
 
 
+# One octave either way -- generous for a real "key change" dial (most karaoke machines top out
+# around here too) while bounding how much rubberband work a single request can trigger.
+_MAX_TRANSPOSE_SEMITONES = 12
+
+
+class TransposeRequest(BaseModel):
+    semitones: int = Field(ge=-_MAX_TRANSPOSE_SEMITONES, le=_MAX_TRANSPOSE_SEMITONES)
+
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -329,6 +339,72 @@ def set_song_starred(slug: str, request: SetStarredRequest) -> dict:
     meta_path.write_text(json.dumps(meta, indent=2))
 
     return {"slug": slug, "starred": request.starred}
+
+
+def _transposed_dir(slug: str, semitones: int) -> Path:
+    return _song_dir(CACHE_DIR, slug) / "transposed" / str(semitones)
+
+
+def _transpose_asset_paths(slug: str, semitones: int) -> tuple[Path, Path]:
+    """Resolve the instrumental/notes paths a given (slug, semitones) key serves from -- the
+    original cached assets at `semitones == 0` (no separate copy kept, since that's just "no key
+    change"), otherwise the disk-cached shifted variant under cache/<slug>/transposed/<semitones>/
+    (see `transpose_song_key` below, the only thing that ever creates that directory).
+    """
+    if semitones == 0:
+        song_dir = _song_dir(CACHE_DIR, slug)
+        return song_dir / "instrumental.wav", song_dir / "notes.json"
+    transposed_dir = _transposed_dir(slug, semitones)
+    return transposed_dir / "instrumental.wav", transposed_dir / "notes.json"
+
+
+@app.post("/api/songs/{slug}/transpose")
+def transpose_song_key(slug: str, request: TransposeRequest) -> dict:
+    """Ensure a pitch-shifted ("key change") variant of `slug`'s instrumental + notes exists,
+    generating and disk-caching it via `transpose_song` (audio_pipeline/transpose.py) on first
+    request for a given (song, semitones) pair -- a later request for the same pair is a cache hit,
+    same convention as the rest of the pipeline (see `pipeline.process_song`). Deliberately a plain
+    (not async) def, same reasoning as `render_recording_mp3` below: this can do real, slow
+    (rubberband) work that would otherwise block the event loop, and FastAPI runs sync handlers in
+    its own threadpool automatically.
+
+    Returns the URLs the frontend should fetch instead of the original CACHE_BASE assets;
+    `semitones == 0` just points back at those originals (see `_transpose_asset_paths`) with no
+    generation step at all.
+    """
+    song_dir = _song_dir(CACHE_DIR, slug)
+    if not (song_dir / "instrumental.wav").exists() or not (song_dir / "notes.json").exists():
+        raise HTTPException(status_code=404, detail="Unknown song")
+
+    if request.semitones != 0:
+        transposed_dir = _transposed_dir(slug, request.semitones)
+        instrumental_path, notes_path = _transpose_asset_paths(slug, request.semitones)
+        if not instrumental_path.exists() or not notes_path.exists():
+            try:
+                transpose_song(song_dir, request.semitones, transposed_dir)
+            except RuntimeError as exc:
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {
+        "instrumental_url": f"/api/songs/{slug}/transpose/{request.semitones}/instrumental.wav",
+        "notes_url": f"/api/songs/{slug}/transpose/{request.semitones}/notes.json",
+    }
+
+
+@app.get("/api/songs/{slug}/transpose/{semitones}/instrumental.wav")
+def get_transposed_instrumental(slug: str, semitones: int) -> FileResponse:
+    instrumental_path, _ = _transpose_asset_paths(slug, semitones)
+    if not instrumental_path.exists():
+        raise HTTPException(status_code=404, detail="That key change hasn't been generated yet")
+    return FileResponse(instrumental_path, media_type="audio/wav")
+
+
+@app.get("/api/songs/{slug}/transpose/{semitones}/notes.json")
+def get_transposed_notes(slug: str, semitones: int) -> FileResponse:
+    _, notes_path = _transpose_asset_paths(slug, semitones)
+    if not notes_path.exists():
+        raise HTTPException(status_code=404, detail="That key change hasn't been generated yet")
+    return FileResponse(notes_path, media_type="application/json")
 
 
 def _recording_title(slug: str) -> str:

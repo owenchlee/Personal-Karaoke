@@ -71,6 +71,23 @@ songs replay instantly from a local cache.
 See [`NOTES.md`](NOTES.md) for the full phase-by-phase design history and the reasoning behind
 specific tuning decisions.
 
+## Optional: key change
+
+Sync your vocal range once (from the app's "Voice range" screen, by singing your lowest and
+highest comfortable note) and songs whose sung range doesn't fit yours are automatically
+transposed -- audio and note targets together, tempo unchanged -- before you play. This needs the
+free, open-source [Rubber Band Library](https://breakfastquay.com/rubberband/) command-line tool
+on your `PATH` (not installed by `pip install -r requirements.txt`, same as `ffmpeg` above):
+
+- **Windows**: download the "Windows executable" zip from
+  [breakfastquay.com/rubberband](https://breakfastquay.com/rubberband/), extract it, and put
+  `rubberband.exe` somewhere on your `PATH`.
+- **macOS**: `brew install rubberband`
+- **Linux**: `apt install rubberband-cli` (or your distro's equivalent)
+
+Run `venv/Scripts/python.exe scripts/check_env.py` to confirm it's found. Without it, everything
+else in the app works exactly as before -- key change is the only feature that needs it.
+
 ## Testing
 
 ```bash

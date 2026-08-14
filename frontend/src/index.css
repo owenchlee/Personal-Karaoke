@@ -828,6 +828,22 @@ code {
   padding: var(--space-2) var(--space-3);
 }
 
+.key-change-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.key-change-value {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-h);
+  min-width: 2.5em;
+  text-align: center;
+}
+
 .recording-active {
   border-color: var(--danger);
   color: var(--danger);
@@ -949,6 +965,43 @@ code {
 
 .pitch-readout-cents--good {
   color: var(--cta);
+}
+
+.voice-range-capture-row {
+  display: flex;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+}
+
+.voice-range-capture {
+  flex: 1 1 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+.voice-range-capture h3 {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.voice-range-value {
+  font-family: var(--font-display);
+  font-size: 1.8rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-h);
+  margin: 0;
 }
 
 .debug-panel {

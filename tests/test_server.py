@@ -212,6 +212,122 @@ def test_set_song_starred_404s_for_unknown_slug(tmp_path, monkeypatch):
     assert response.status_code == 404
 
 
+def _seed_cached_song(cache_dir: Path, slug: str) -> None:
+    song_dir = cache_dir / slug
+    song_dir.mkdir(parents=True)
+    (song_dir / "instrumental.wav").write_bytes(b"original wav data")
+    (song_dir / "notes.json").write_text(json.dumps([{"pitch_midi": 60}]))
+
+
+def test_transpose_song_key_404s_for_unknown_song(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CACHE_DIR", tmp_path / "cache")
+
+    response = client.post("/api/songs/does-not-exist/transpose", json={"semitones": 3})
+
+    assert response.status_code == 404
+
+
+def test_transpose_song_key_at_zero_semitones_points_back_at_the_original_without_generating(
+    tmp_path, monkeypatch
+):
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    _seed_cached_song(cache_dir, "my-song")
+
+    def _fail_if_called(*args, **kwargs):
+        raise AssertionError("should not be called for a zero-semitone request")
+
+    monkeypatch.setattr(server, "transpose_song", _fail_if_called)
+
+    response = client.post("/api/songs/my-song/transpose", json={"semitones": 0})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "instrumental_url": "/api/songs/my-song/transpose/0/instrumental.wav",
+        "notes_url": "/api/songs/my-song/transpose/0/notes.json",
+    }
+
+    instrumental_response = client.get(body["instrumental_url"])
+    assert instrumental_response.status_code == 200
+    assert instrumental_response.content == b"original wav data"
+
+
+def test_transpose_song_key_generates_and_caches_a_shifted_variant(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    _seed_cached_song(cache_dir, "my-song")
+
+    calls = []
+
+    def fake_transpose_song(song_cache_dir, semitones, output_dir):
+        calls.append(semitones)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "instrumental.wav").write_bytes(b"shifted wav data")
+        (output_dir / "notes.json").write_text(json.dumps([{"pitch_midi": 63}]))
+        from audio_pipeline.transpose import TransposeResult
+        return TransposeResult(
+            instrumental_path=output_dir / "instrumental.wav", notes_path=output_dir / "notes.json"
+        )
+
+    monkeypatch.setattr(server, "transpose_song", fake_transpose_song)
+
+    response = client.post("/api/songs/my-song/transpose", json={"semitones": 3})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "instrumental_url": "/api/songs/my-song/transpose/3/instrumental.wav",
+        "notes_url": "/api/songs/my-song/transpose/3/notes.json",
+    }
+
+    instrumental_response = client.get(body["instrumental_url"])
+    assert instrumental_response.content == b"shifted wav data"
+    notes_response = client.get(body["notes_url"])
+    assert notes_response.json() == [{"pitch_midi": 63}]
+
+    # A second request for the identical (song, semitones) pair is a cache hit -- doesn't
+    # regenerate.
+    client.post("/api/songs/my-song/transpose", json={"semitones": 3})
+    assert calls == [3]
+
+
+def test_transpose_song_key_rejects_a_shift_outside_the_allowed_range(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    _seed_cached_song(cache_dir, "my-song")
+
+    response = client.post("/api/songs/my-song/transpose", json={"semitones": 13})
+
+    assert response.status_code == 422
+
+
+def test_transpose_song_key_returns_500_when_transposing_fails(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    _seed_cached_song(cache_dir, "my-song")
+
+    def fake_transpose_song(song_cache_dir, semitones, output_dir):
+        raise RuntimeError("rubberband is not on PATH")
+
+    monkeypatch.setattr(server, "transpose_song", fake_transpose_song)
+
+    response = client.post("/api/songs/my-song/transpose", json={"semitones": 3})
+
+    assert response.status_code == 500
+
+
+def test_get_transposed_instrumental_404s_when_not_yet_generated(tmp_path, monkeypatch):
+    cache_dir = tmp_path / "cache"
+    monkeypatch.setattr(server, "CACHE_DIR", cache_dir)
+    _seed_cached_song(cache_dir, "my-song")
+
+    response = client.get("/api/songs/my-song/transpose/5/instrumental.wav")
+
+    assert response.status_code == 404
+
+
 def test_song_dir_rejects_a_slug_that_resolves_above_base(tmp_path):
     """Unit-level check for the guard `delete_song` relies on: a literal "/"
     in the slug can't even reach that route (FastAPI's default path

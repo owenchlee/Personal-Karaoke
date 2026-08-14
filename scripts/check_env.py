@@ -29,8 +29,22 @@ def check_ffmpeg_binary() -> list[str]:
     return errors
 
 
+def check_rubberband_binary() -> list[str]:
+    """Optional: only the key-change feature (audio_pipeline/transpose.py) needs this, so a
+    missing binary is reported but doesn't fail the overall check the way a missing ffmpeg does --
+    see README's "Optional: key change" section for install instructions.
+    """
+    path = shutil.which("rubberband")
+    if path:
+        print(f"OK   system binary rubberband -> {path}")
+    else:
+        print('MISSING system binary rubberband (optional -- only needed for "key change")')
+    return []
+
+
 def main() -> int:
     errors = check_imports() + check_ffmpeg_binary()
+    check_rubberband_binary()
     if errors:
         print("\n".join(errors), file=sys.stderr)
         print(f"\n{len(errors)} check(s) failed.", file=sys.stderr)

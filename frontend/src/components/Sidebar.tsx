@@ -10,7 +10,7 @@ interface SidebarProps {
 
 // Screens that need a live job server (loading new songs, uploading recordings, persisted
 // scores) -- meaningless on the static demo build, so left out of its nav entirely.
-const DEMO_ONLY_SCREENS = new Set(['load', 'recordings', 'highscores'])
+const DEMO_ONLY_SCREENS = new Set(['load', 'recordings', 'highscores', 'voicerange'])
 
 const ALL_NAV_LINKS: Array<{ href: string; screen: string | null; label: string }> = [
   { href: BASE_URL, screen: null, label: 'Play' },
@@ -19,6 +19,7 @@ const ALL_NAV_LINKS: Array<{ href: string; screen: string | null; label: string 
   { href: `${BASE_URL}?screen=recordings`, screen: 'recordings', label: 'My recordings' },
   { href: `${BASE_URL}?screen=highscores`, screen: 'highscores', label: 'High Scores' },
   { href: `${BASE_URL}?screen=calibrate`, screen: 'calibrate', label: 'Mic calibration' },
+  { href: `${BASE_URL}?screen=voicerange`, screen: 'voicerange', label: 'Voice range' },
 ]
 
 const NAV_LINKS = DEMO_MODE

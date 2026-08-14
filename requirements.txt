@@ -88,6 +88,12 @@ python-multipart>=0.0.9
 
 pytest>=8.0.0
 
+# Pitch-shifting for the "key change" feature (audio_pipeline/transpose.py): a thin wrapper that
+# shells out to a separately-installed `rubberband` CLI binary, the same category of external-binary
+# dependency this file already has for ffmpeg (see README's "Optional: key change" section for the
+# free, open-source Rubber Band Library install instructions -- pip alone does not provide it).
+pyrubberband>=0.4.0
+
 # BS-RoFormer separation model (audio_pipeline/separation.py's "bs_roformer" option) --
 # higher-quality vocal isolation than either Demucs model, at a real cost: ~3.5x the input
 # audio's own duration on this CPU (see NOTES.md's "Separation model choice: BS-RoFormer

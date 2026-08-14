@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { NoteEvent } from '../types/note'
 import type { LyricWord } from '../types/lyrics'
 import LyricsDisplay from './LyricsDisplay'
@@ -6,6 +6,7 @@ import NoteHighway from './NoteHighway'
 import SongLibrary from './SongLibrary'
 import { midiToNoteName } from '../game/coords'
 import { accuracyFraction } from '../game/scoring'
+import { computeBestShift, hasVoiceRange, loadVoiceRange } from '../game/voiceRange'
 import { useLivePitchIndicator } from '../hooks/useLivePitchIndicator'
 import { useMicPitch } from '../hooks/useMicPitch'
 import { useRecording } from '../hooks/useRecording'
@@ -13,6 +14,10 @@ import { useScoring } from '../hooks/useScoring'
 import type { ScoreSubmissionResult } from '../types/score'
 import type { Song } from '../types/song'
 import { BASE_URL, CACHE_BASE, DEMO_MODE, SONGS_URL } from '../config'
+
+// One octave either way -- must match the job server's own `_MAX_TRANSPOSE_SEMITONES`
+// (scripts/server.py), which rejects anything outside this range with a 422.
+const MAX_TRANSPOSE_SEMITONES = 12
 
 function getSongId(): string | null {
   return new URLSearchParams(window.location.search).get('song')
@@ -58,6 +63,17 @@ function GameScreen() {
   const [recentNotes, setRecentNotes] = useState<RecentNoteStat[]>([])
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
+  // The "key change" feature (see game/voiceRange.ts): `baseNotesRef` always holds the song's
+  // original, untransposed notes (so `computeBestShift` and a "reset to original key" both have
+  // something stable to work from), while `notes`/`instrumentalUrl` hold whatever's actually being
+  // played right now -- the original, or a key-shifted variant fetched from the job server.
+  const baseNotesRef = useRef<NoteEvent[]>([])
+  const [semitoneShift, setSemitoneShift] = useState(0)
+  const [keyChangeStatus, setKeyChangeStatus] = useState<'idle' | 'loading' | 'error'>('idle')
+  const [instrumentalUrl, setInstrumentalUrl] = useState<string | null>(null)
+  const transposeRequestIdRef = useRef(0)
+  const [voiceRangeSaved] = useState(hasVoiceRange)
+
   const {
     status: micStatus,
     start: startMic,
@@ -90,6 +106,9 @@ function GameScreen() {
     ])
       .then(([notesData, lyricsData]) => {
         if (cancelled) return
+        baseNotesRef.current = notesData
+        setSemitoneShift(0)
+        setInstrumentalUrl(null)
         setNotes(notesData)
         setLyrics(lyricsData)
         setLoadState('loaded')
@@ -103,6 +122,64 @@ function GameScreen() {
       cancelled = true
     }
   }, [songId])
+
+  // Ensures a pitch-shifted variant of this song exists (generating/caching it server-side on
+  // first request -- see scripts/server.py's transpose endpoints) and swaps `notes`/
+  // `instrumentalUrl` over to it. `shift === 0` just reverts to the original assets locally, no
+  // request needed. Guards against out-of-order responses (e.g. the +/- buttons clicked faster
+  // than a request can resolve) with a request-id token -- only the most recently issued request's
+  // result is ever applied.
+  const applyKeyShift = useCallback(
+    async (shift: number) => {
+      const requestId = ++transposeRequestIdRef.current
+
+      if (shift === 0) {
+        setNotes(baseNotesRef.current)
+        setInstrumentalUrl(null)
+        setSemitoneShift(0)
+        setKeyChangeStatus('idle')
+        return
+      }
+
+      setKeyChangeStatus('loading')
+      try {
+        const response = await fetch(`/api/songs/${songId}/transpose`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ semitones: shift }),
+        })
+        if (!response.ok) throw new Error(`Failed to transpose: ${response.status}`)
+        const { instrumental_url, notes_url } = (await response.json()) as {
+          instrumental_url: string
+          notes_url: string
+        }
+        const shiftedNotes = await fetchJson<NoteEvent[]>(notes_url)
+
+        if (transposeRequestIdRef.current !== requestId) return // superseded by a newer request
+        setNotes(shiftedNotes)
+        setInstrumentalUrl(instrumental_url)
+        setSemitoneShift(shift)
+        setKeyChangeStatus('idle')
+      } catch {
+        if (transposeRequestIdRef.current !== requestId) return
+        setKeyChangeStatus('error')
+      }
+    },
+    [songId],
+  )
+
+  // Auto-fits the key the moment a song's notes are available, if the player has synced a voice
+  // range (game/voiceRange.ts) -- runs once per song load, not on every render, since `loadState`
+  // only transitions to 'loaded' once per songId. A no-op (stays in the original key) when no
+  // range is saved, on the demo build (no job server to transpose against), or when the song
+  // already fits.
+  useEffect(() => {
+    if (loadState !== 'loaded' || DEMO_MODE) return
+    const voiceRange = loadVoiceRange()
+    if (!voiceRange) return
+    const bestShift = computeBestShift(baseNotesRef.current, voiceRange)
+    if (bestShift !== 0) void applyKeyShift(bestShift)
+  }, [loadState, applyKeyShift])
 
   useEffect(() => {
     if (songId === null) return
@@ -278,7 +355,51 @@ function GameScreen() {
                 </label>
               </div>
             </div>
-            <audio ref={audioRef} src={`${CACHE_BASE}/${songId}/instrumental.wav`} controls />
+            <audio
+              ref={audioRef}
+              src={instrumentalUrl ?? `${CACHE_BASE}/${songId}/instrumental.wav`}
+              controls
+            />
+            {!DEMO_MODE && voiceRangeSaved && (
+              <div className="key-change-row">
+                <span className="pitch-readout-label">Key</span>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={keyChangeStatus === 'loading' || semitoneShift <= -MAX_TRANSPOSE_SEMITONES}
+                  onClick={() => void applyKeyShift(Math.max(semitoneShift - 1, -MAX_TRANSPOSE_SEMITONES))}
+                  aria-label="Shift key down one semitone"
+                >
+                  &minus;
+                </button>
+                <span className="key-change-value">
+                  {semitoneShift === 0 ? 'Original' : semitoneShift > 0 ? `+${semitoneShift}` : semitoneShift}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  disabled={keyChangeStatus === 'loading' || semitoneShift >= MAX_TRANSPOSE_SEMITONES}
+                  onClick={() => void applyKeyShift(Math.min(semitoneShift + 1, MAX_TRANSPOSE_SEMITONES))}
+                  aria-label="Shift key up one semitone"
+                >
+                  +
+                </button>
+                {semitoneShift !== 0 && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={keyChangeStatus === 'loading'}
+                    onClick={() => void applyKeyShift(0)}
+                  >
+                    Reset
+                  </button>
+                )}
+                {keyChangeStatus === 'loading' && <span className="muted">Adjusting to your key&hellip;</span>}
+                {keyChangeStatus === 'error' && (
+                  <span className="form-error">Key change failed -- still playing the last working key.</span>
+                )}
+              </div>
+            )}
             {micStatus === 'active' && (
               <div className="pitch-readout">
                 <span className="pitch-readout-item">
