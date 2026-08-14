@@ -50,3 +50,24 @@ def test_align_tokens_rejects_an_unsupported_language(tmp_path):
         align_tokens(["hi"], vocal_path, "fr")
 
 
+def test_align_tokens_reports_progress_ending_at_1(tmp_path):
+    vocal_path = tmp_path / "vocals.wav"
+    _write_synthetic_wav(vocal_path)
+    fractions = []
+
+    align_tokens(["one", "two", "three"], vocal_path, "en", on_progress=fractions.append)
+
+    assert fractions  # at least one intermediate call, not silent until the very end
+    assert fractions[-1] == 1.0
+    assert fractions == sorted(fractions)  # monotonically increasing, never jumps backward
+
+
+def test_align_tokens_does_not_report_progress_for_no_tokens(tmp_path):
+    vocal_path = tmp_path / "vocals.wav"
+    _write_synthetic_wav(vocal_path)
+    fractions = []
+
+    assert align_tokens([], vocal_path, "en", on_progress=fractions.append) == []
+    assert fractions == []
+
+

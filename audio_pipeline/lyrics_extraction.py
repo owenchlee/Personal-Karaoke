@@ -358,17 +358,24 @@ def _force_align_synced_lyrics(
     words: list[dict],
     background_ranges: list[tuple[float, float]],
     vocal_stem_path: Path,
+    on_progress: Callable[[float], None] | None = None,
 ) -> tuple[list[dict], list[tuple[float, float]]]:
     """Replace lrclib-fetched ``words``' guessed timing with real per-word timestamps measured
     directly against this audio (see the module comment above ``_CJK_RE``), and re-time
     ``background_ranges`` (see ``lyrics_lookup.fetch_synced_lyrics``) from the newly-aligned
     neighboring words rather than their own now-distrusted raw timestamps.
+
+    ``on_progress``, if given, is passed straight through to
+    ``forced_alignment.align_tokens`` -- this call is a thin wrapper around it
+    and does no other slow work of its own.
     """
     if not words:
+        if on_progress:
+            on_progress(1.0)
         return words, background_ranges
 
     tokens = [word["word"] for word in words]
-    aligned = align_tokens(tokens, vocal_stem_path, _language_of_words(words))
+    aligned = align_tokens(tokens, vocal_stem_path, _language_of_words(words), on_progress=on_progress)
     new_words = [{**word, **timing} for word, timing in zip(words, aligned)]
     new_ranges = [
         _interpolate_background_range(start, end, words, new_words)
@@ -564,6 +571,7 @@ def _repair_synced_lyrics_gaps(
     vocal_stem_path: Path,
     language: str | None,
     hotwords: str | None = None,
+    on_progress: Callable[[float], None] | None = None,
 ) -> list[dict]:
     """Fills real-singing gaps in lrclib-sourced ``words`` the same way ``_repair_energetic_gaps``
     already does for local transcription, and additionally repairs any overlong force-aligned word
@@ -572,8 +580,17 @@ def _repair_synced_lyrics_gaps(
     Whisper at all if a cheap, model-free scan finds at least one of either worth repairing, so a
     song whose lrclib lyrics already cover the whole song -- the common case -- stays on the fast
     lookup-only path.
+
+    ``on_progress``, if given, is called with a 0-1 fraction of this call's own progress. Neither
+    repair pass below is naturally chunked (each is a handful of one-shot Whisper calls, not
+    something to report per-item progress on cheaply) so this only reports coarse milestones --
+    still enough to keep the overall job progress moving instead of sitting frozen for however long
+    Whisper takes to load and run, which is what actually produced the "stuck" symptom this was
+    added to fix.
     """
     if not words:
+        if on_progress:
+            on_progress(1.0)
         return words
 
     audio, sampling_rate = sf.read(vocal_stem_path)
@@ -581,6 +598,8 @@ def _repair_synced_lyrics_gaps(
         audio = audio.mean(axis=1)
     overlong_runs = _find_overlong_word_runs(words)
     if not overlong_runs and not _find_energetic_gaps(audio, sampling_rate, words, background_ranges):
+        if on_progress:
+            on_progress(1.0)
         return words
 
     device = get_device()
@@ -590,15 +609,22 @@ def _repair_synced_lyrics_gaps(
         str(vocal_stem_path), sampling_rate=model.feature_extractor.sampling_rate
     )
     resolved_language = language or _detect_language(model, model_audio)
+    if on_progress:
+        on_progress(0.2)
     if overlong_runs:
         words = _repair_overlong_words(
             model, model_audio, model.feature_extractor.sampling_rate, resolved_language, words,
             hotwords=hotwords,
         )
-    return _repair_energetic_gaps(
+    if on_progress:
+        on_progress(0.6)
+    words = _repair_energetic_gaps(
         model, model_audio, model.feature_extractor.sampling_rate, resolved_language, words,
         hotwords=hotwords,
     )
+    if on_progress:
+        on_progress(1.0)
+    return words
 
 
 def extract_lyrics(
@@ -626,8 +652,9 @@ def extract_lyrics(
     name or unusual proper nouns without it.
 
     ``on_progress``, if given, is called with a 0-1 fraction of this stage's
-    own progress -- 1.0 right away for the fast online-lookup path, or
-    tracking chunk-by-chunk transcription progress (reserving the last 5%
+    own progress -- tracking window-by-window forced-alignment progress
+    (reserving the last 20% for the gap-repair pass) on the online-lookup
+    path, or chunk-by-chunk transcription progress (reserving the last 5%
     for the gap-repair pass) when it falls back to local transcription.
 
     Returns a ``LyricsResult`` with the path to the saved file and any backing/ad-lib-vocal time
@@ -655,14 +682,19 @@ def extract_lyrics(
         fetched = fetch_synced_lyrics(lyrics_query, duration_seconds=duration_seconds)
         if fetched is not None:
             words, background_ranges = fetched
+            align_progress = (
+                (lambda fraction: on_progress(fraction * 0.8)) if on_progress else None
+            )
             words, background_ranges = _force_align_synced_lyrics(
-                words, background_ranges, vocal_stem_path
+                words, background_ranges, vocal_stem_path, on_progress=align_progress
+            )
+            repair_progress = (
+                (lambda fraction: on_progress(0.8 + fraction * 0.2)) if on_progress else None
             )
             words = _repair_synced_lyrics_gaps(
-                words, background_ranges, vocal_stem_path, language, hotwords=hotwords
+                words, background_ranges, vocal_stem_path, language, hotwords=hotwords,
+                on_progress=repair_progress,
             )
-            if on_progress:
-                on_progress(1.0)
 
     if words is None:
         device = get_device()

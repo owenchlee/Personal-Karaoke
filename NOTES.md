@@ -1643,3 +1643,46 @@ in this file. Updated `cache/dhruv-double-take-lyrics/lyrics.json` and republish
 class of bug isn't title-specific like the FLAC one above, so any synced-lyrics-sourced song could
 in principle be affected, but a bulk `reprocess_from_vocals.py --all` sweep wasn't done here since
 only this one song was reported.
+
+## Loading screen stuck at 30% on the lrclib/force-align path (recorded 2026-08-13)
+
+Reported: after loading one song successfully in a browser tab, loading a *second* song in that
+same tab shows the progress bar frozen at 30% -- but the song actually finishes processing in the
+background (confirmed: opening a fresh tab and loading the same song again completes instantly,
+i.e. it hit the cache). Root-caused by tracing the progress pipeline end to end rather than
+guessing at frontend state bugs: `LoadSongForm.tsx` polls `GET /api/jobs/{id}` and renders
+`job.progress` verbatim, with no client-side smoothing -- so the frontend was accurately reporting
+exactly what the backend sent it, which was nothing new for a long stretch. `scripts/server.py`'s
+`_STAGE_SPANS` maps the `transcribing_lyrics` stage to the `(0.30, 0.95)` overall-progress span, and
+`extract_lyrics()` (`audio_pipeline/lyrics_extraction.py`) starts that stage by reporting fraction
+`0.0` -- pinning overall progress at exactly 30% -- then, on the lrclib/synced-lyrics path (the
+common case for any song with a mainstream release), called `on_progress` exactly once more, at the
+very end (`on_progress(1.0)`), after both `_force_align_synced_lyrics` (loads the MMS CTC model,
+force-aligns the *whole song*) and `_repair_synced_lyrics_gaps` (can load `large-v3` Whisper on top
+of that) had fully finished. Neither of those had any progress hook at all -- confirmed via grep,
+`on_progress` didn't appear anywhere in `forced_alignment.py`. The local-transcription fallback path
+(no lrclib match) was unaffected: `_transcribe_chunked` already reports progress after every ~40s
+chunk, so it climbs smoothly from 30% instead of freezing. This made the bug look
+session/song-dependent rather than deterministic: whichever song a user happens to load next is
+what determines whether it hits the silent lrclib path or the already-granular fallback path, not
+which position it is in the session -- matching the "first song fine, second stuck" framing exactly
+even though the real trigger is per-song, not per-tab.
+
+**Fix**: threaded `on_progress` through the whole force-align + repair chain instead of adding any
+frontend polling/state workaround (there was nothing to fix there -- see above).
+`forced_alignment._generate_emissions` (the actual expensive part of `align_tokens` for a full
+song -- one model forward pass per 30s window) now calls `on_progress` after each batch;
+`align_tokens` reserves the last 5% of its own range for the fast, non-incremental Viterbi
+decode/span step after that. `_force_align_synced_lyrics` passes `on_progress` straight through
+(it's a thin wrapper and does no other slow work of its own). `_repair_synced_lyrics_gaps` isn't
+naturally chunked (a handful of one-shot Whisper calls, not per-item work cheap to report progress
+on), so it reports coarse milestones instead (after the skip-check, after model load, after each
+repair pass) -- still enough to keep the bar moving instead of sitting frozen for however long
+Whisper takes. `extract_lyrics()` splits the `transcribing_lyrics` stage's own 0-1 range 80/20
+between force-align and gap-repair on this path (mirroring the existing 95/5 split already used for
+the local-transcription path's own gap-repair pass). Every early-return branch (empty word list,
+nothing needing repair) still calls `on_progress(1.0)` so the stage always reaches 100% even when
+there's no real work to report progress on incrementally. 6 new unit tests
+(`tests/test_forced_alignment.py`, `tests/test_lyrics_extraction.py`) verifying progress is reported
+monotonically and always ends at 1.0, including the two empty/skip early-return paths that
+previously reported nothing at all. 223 Python tests pass total.

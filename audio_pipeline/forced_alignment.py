@@ -32,6 +32,7 @@ import re
 import subprocess
 import unicodedata
 from pathlib import Path
+from typing import Callable
 
 import torch
 import torchaudio
@@ -72,11 +73,18 @@ def _load_audio(path: str, dtype: torch.dtype, device: str) -> torch.Tensor:
     return waveform.to(dtype).to(device) / 32768.0
 
 
-def _generate_emissions(model, audio_waveform: torch.Tensor) -> tuple[torch.Tensor, float]:
+def _generate_emissions(
+    model, audio_waveform: torch.Tensor, on_progress: "Callable[[float], None] | None" = None
+) -> tuple[torch.Tensor, float]:
     """Run ``model`` over ``audio_waveform`` in overlapping windows (a full
     song is far longer than the model's own effective receptive field) and
     return per-frame log-probabilities plus the stride (ms of audio each
     frame represents), used later to convert frame indices back to seconds.
+
+    This is the expensive part of ``align_tokens`` for a full song -- one
+    forward pass per window -- so ``on_progress``, if given, is called with a
+    0-1 fraction after each batch (see ``align_tokens``'s own docstring for
+    why this needs reporting at all).
     """
     ratio = model.config.inputs_to_logits_ratio
     window = _WINDOW_SECONDS * _SAMPLING_FREQ
@@ -98,6 +106,8 @@ def _generate_emissions(model, audio_waveform: torch.Tensor) -> tuple[torch.Tens
         for i in range(0, input_tensor.size(0), _BATCH_SIZE):
             batch = input_tensor[i : i + _BATCH_SIZE]
             emissions_chunks.append(model(batch).logits)
+            if on_progress:
+                on_progress(min(1.0, (i + _BATCH_SIZE) / input_tensor.size(0)))
 
     emissions = torch.cat(emissions_chunks, dim=0)
     if context > 0:
@@ -227,7 +237,12 @@ def _load_model(device: str):
     return model, tokenizer
 
 
-def align_tokens(tokens: list[str], audio_path: str | Path, language: str) -> list[dict]:
+def align_tokens(
+    tokens: list[str],
+    audio_path: str | Path,
+    language: str,
+    on_progress: Callable[[float], None] | None = None,
+) -> list[dict]:
     """Force-align ``tokens`` (already tokenized, in the exact order they're
     sung) against ``audio_path``, returning ``[{"start", "end"}, ...]`` --
     one entry per input token, same order and length, grounded in this
@@ -238,6 +253,12 @@ def align_tokens(tokens: list[str], audio_path: str | Path, language: str) -> li
     expected pre-split into individual characters (matching
     lyrics_lookup._tokenize_line's own CJK handling), since Cantonese has no
     whitespace word boundaries for this to align against either.
+
+    ``on_progress``, if given, is called with a 0-1 fraction of this call's
+    own progress -- almost all of it tracking ``_generate_emissions``'s
+    windowed forward passes (the only part of this whose cost scales with
+    song length), with the final Viterbi decode/span step (fast and
+    non-incremental) folded into the last bit of that range.
     """
     if not tokens:
         return []
@@ -249,7 +270,10 @@ def align_tokens(tokens: list[str], audio_path: str | Path, language: str) -> li
     model, tokenizer = _load_model(device)
 
     audio_waveform = _load_audio(str(audio_path), model.dtype, device)
-    emissions, stride_ms = _generate_emissions(model, audio_waveform)
+    emissions_progress = (
+        (lambda fraction: on_progress(fraction * 0.95)) if on_progress else None
+    )
+    emissions, stride_ms = _generate_emissions(model, audio_waveform, on_progress=emissions_progress)
 
     # A <star> "wildcard" token between every word (not just at the very start/end of the whole
     # song), matching ctc-forced-aligner's own star_frequency="segment" mode -- required, not
@@ -293,4 +317,6 @@ def align_tokens(tokens: list[str], audio_path: str | Path, language: str) -> li
         start_sec = span[0].start * stride_ms / 1000
         end_sec = (span[-1].end + 1) * stride_ms / 1000
         results.append({"start": round(start_sec, 4), "end": round(end_sec, 4)})
+    if on_progress:
+        on_progress(1.0)
     return results

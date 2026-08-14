@@ -8,7 +8,7 @@ real singing (that's a manual check, see NOTES.md).
 """
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -605,6 +605,42 @@ def test_repair_synced_lyrics_gaps_recovers_an_overlong_force_aligned_word(tmp_p
     assert len(fake_model.calls) == 2
 
 
+def test_repair_synced_lyrics_gaps_reports_progress_ending_at_1_when_skipped(tmp_path):
+    # Regression test: this early-return ("nothing to repair") path used to report no progress at
+    # all, which -- chained behind `_force_align_synced_lyrics`'s own now-fixed silence -- was the
+    # root cause of the job progress bar reading "stuck at 30%" for the whole lrclib/force-align
+    # path even though the pipeline was actually still running (see NOTES.md).
+    vocal_path = tmp_path / "vocals.wav"
+    _write_wav_with_tone_span(vocal_path, total_s=5.0, tone_start_s=0.0, tone_end_s=1.0)
+    words = [{"word": "hi", "start": 0.0, "end": 0.3, "line": 0}]
+    fractions = []
+
+    with patch("audio_pipeline.lyrics_extraction.WhisperModel"):
+        _repair_synced_lyrics_gaps(words, [], vocal_path, language="en", on_progress=fractions.append)
+
+    assert fractions == [1.0]
+
+
+def test_repair_synced_lyrics_gaps_reports_progress_ending_at_1_when_repairing(tmp_path):
+    vocal_path = tmp_path / "vocals.wav"
+    _write_wav_with_tone_span(vocal_path, total_s=20.0, tone_start_s=1.0, tone_end_s=10.0)
+    words = [
+        {"word": "you", "start": 0.0, "end": 1.0, "line": 3},
+        {"word": "wont", "start": 10.0, "end": 11.0, "line": 3},
+    ]
+    fake_model = _FakeRepairModel(
+        [[_segment([_word(" inside", 4.0, 4.5), _word(" the", 4.5, 4.8)])]]
+    )
+    fractions = []
+
+    with patch("audio_pipeline.lyrics_extraction.WhisperModel", return_value=fake_model):
+        _repair_synced_lyrics_gaps(words, [], vocal_path, language="en", on_progress=fractions.append)
+
+    assert fractions  # not silent for the whole call
+    assert fractions[-1] == 1.0
+    assert fractions == sorted(fractions)
+
+
 def _write_synthetic_wav(path, duration_s=2.0, samplerate=16000, freq_hz=220.0):
     t = np.linspace(0, duration_s, int(duration_s * samplerate), endpoint=False)
     tone = 0.3 * np.sin(2 * np.pi * freq_hz * t)
@@ -683,7 +719,7 @@ def test_force_align_synced_lyrics_replaces_guessed_timing_with_aligned_timing(t
     ) as mock_align:
         words_result, ranges_result = _force_align_synced_lyrics(words, [(1.1, 1.4)], vocal_path)
 
-    mock_align.assert_called_once_with(["early", "word"], vocal_path, "en")
+    mock_align.assert_called_once_with(["early", "word"], vocal_path, "en", on_progress=None)
     assert words_result == [
         {"word": "early", "start": 1.85, "end": 2.05, "line": 0},
         {"word": "word", "start": 2.05, "end": 2.3, "line": 0},
@@ -696,6 +732,27 @@ def test_force_align_synced_lyrics_passes_through_empty_words_untouched():
 
     assert words_result == []
     assert ranges_result == []
+
+
+def test_force_align_synced_lyrics_reports_progress_ending_at_1_for_empty_words():
+    fractions = []
+
+    _force_align_synced_lyrics([], [], "unused.wav", on_progress=fractions.append)
+
+    assert fractions == [1.0]
+
+
+def test_force_align_synced_lyrics_passes_on_progress_through_to_align_tokens(tmp_path):
+    vocal_path = tmp_path / "vocals.wav"
+    _write_synthetic_wav(vocal_path)
+    words = [{"word": "hi", "start": 0.5, "end": 0.8, "line": 0}]
+    aligned = [{"start": 1.0, "end": 1.2}]
+    on_progress = MagicMock()
+
+    with patch("audio_pipeline.lyrics_extraction.align_tokens", return_value=aligned) as mock_align:
+        _force_align_synced_lyrics(words, [], vocal_path, on_progress=on_progress)
+
+    mock_align.assert_called_once_with(["hi"], vocal_path, "en", on_progress=on_progress)
 
 
 def test_extract_lyrics_produces_readable_json(tmp_path):
