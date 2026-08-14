@@ -19,6 +19,17 @@ import { BASE_URL, CACHE_BASE, DEMO_MODE, SONGS_URL } from '../config'
 // (scripts/server.py), which rejects anything outside this range with a 422.
 const MAX_TRANSPOSE_SEMITONES = 12
 
+// The transpose request has no real progress signal to report (pyrubberband blocks on a single
+// `rubberband` subprocess call with nothing to poll -- see audio_pipeline/transpose.py), so the
+// bar below is driven by an elapsed-time estimate instead: calibrated against that file's own
+// benchmark comment (a 214.7s instrumental took ~12s on the reference CPU, i.e. ~5.6% of the
+// song's own duration), scaled to this song's length. Capped short of 100% so a slower machine
+// doesn't leave the bar sitting at "done" while the request is still in flight.
+const TRANSPOSE_REALTIME_ESTIMATE_FACTOR = 12 / 214.7
+const MIN_TRANSPOSE_ESTIMATE_MS = 1500
+const MAX_ESTIMATED_TRANSPOSE_PROGRESS = 0.95
+const FALLBACK_SONG_DURATION_SECONDS = 180
+
 function getSongId(): string | null {
   return new URLSearchParams(window.location.search).get('song')
 }
@@ -70,6 +81,7 @@ function GameScreen() {
   const baseNotesRef = useRef<NoteEvent[]>([])
   const [semitoneShift, setSemitoneShift] = useState(0)
   const [keyChangeStatus, setKeyChangeStatus] = useState<'idle' | 'loading' | 'error'>('idle')
+  const [keyChangeProgress, setKeyChangeProgress] = useState(0)
   const [instrumentalUrl, setInstrumentalUrl] = useState<string | null>(null)
   const transposeRequestIdRef = useRef(0)
   const [voiceRangeSaved] = useState(hasVoiceRange)
@@ -167,6 +179,28 @@ function GameScreen() {
     },
     [songId],
   )
+
+  // Drives `keyChangeProgress` off elapsed time against the estimate above rather than any signal
+  // from the request itself -- see the constants' comment for why nothing better is available.
+  useEffect(() => {
+    if (keyChangeStatus !== 'loading') return
+
+    const lastNote = baseNotesRef.current[baseNotesRef.current.length - 1]
+    const songDurationSeconds = lastNote ? lastNote.offset : FALLBACK_SONG_DURATION_SECONDS
+    const estimatedMs = Math.max(
+      songDurationSeconds * TRANSPOSE_REALTIME_ESTIMATE_FACTOR * 1000,
+      MIN_TRANSPOSE_ESTIMATE_MS,
+    )
+    const startedAt = performance.now()
+
+    setKeyChangeProgress(0)
+    const intervalId = window.setInterval(() => {
+      const elapsedMs = performance.now() - startedAt
+      setKeyChangeProgress(Math.min(elapsedMs / estimatedMs, MAX_ESTIMATED_TRANSPOSE_PROGRESS))
+    }, 100)
+
+    return () => window.clearInterval(intervalId)
+  }, [keyChangeStatus])
 
   // Auto-fits the key the moment a song's notes are available, if the player has synced a voice
   // range (game/voiceRange.ts) -- runs once per song load, not on every render, since `loadState`
@@ -398,12 +432,16 @@ function GameScreen() {
                   <>
                     <span className="muted">Adjusting to your key&hellip;</span>
                     <span
-                      className="progress-bar progress-bar--indeterminate"
+                      className="progress-bar key-change-progress-bar"
                       role="status"
                       aria-label="Adjusting to your key"
                     >
-                      <span className="progress-bar-fill" />
+                      <span
+                        className="progress-bar-fill"
+                        style={{ width: `${Math.round(keyChangeProgress * 100)}%` }}
+                      />
                     </span>
+                    <span className="muted">{Math.round(keyChangeProgress * 100)}%</span>
                   </>
                 )}
                 {keyChangeStatus === 'error' && (
