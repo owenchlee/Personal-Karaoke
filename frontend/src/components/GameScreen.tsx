@@ -394,7 +394,18 @@ function GameScreen() {
                     Reset
                   </button>
                 )}
-                {keyChangeStatus === 'loading' && <span className="muted">Adjusting to your key&hellip;</span>}
+                {keyChangeStatus === 'loading' && (
+                  <>
+                    <span className="muted">Adjusting to your key&hellip;</span>
+                    <span
+                      className="progress-bar progress-bar--indeterminate"
+                      role="status"
+                      aria-label="Adjusting to your key"
+                    >
+                      <span className="progress-bar-fill" />
+                    </span>
+                  </>
+                )}
                 {keyChangeStatus === 'error' && (
                   <span className="form-error">Key change failed -- still playing the last working key.</span>
                 )}
