@@ -48,8 +48,8 @@ Everything after step 1 is cached per song, so replaying is instant and processi
 **Requires:** Python 3.11, Node.js, and `ffmpeg` on your `PATH`.
 
 ```bash
-git clone https://github.com/owenchlee/Personal-Karaoke.git
-cd Personal-Karaoke
+git clone https://github.com/owenchlee/SingScore.git
+cd SingScore
 
 # 1. Start the backend (leave this terminal running)
 py -3.11 -m venv venv

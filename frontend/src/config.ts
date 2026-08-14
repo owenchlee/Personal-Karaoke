@@ -4,7 +4,7 @@
  * are hidden rather than left to fail against a nonexistent API. */
 export const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true'
 
-/** The path the app is served under -- '/' locally, but '/Personal-Karaoke/' on GitHub Pages
+/** The path the app is served under -- '/' locally, but '/SingScore/' on GitHub Pages
  * (see the `base` option in vite.config.ts). Every in-app navigation and root-relative fetch
  * must be built from this rather than a literal leading '/', or it breaks on GitHub Pages by
  * sending the browser to the site root instead of back into the app. */

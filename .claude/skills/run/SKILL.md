@@ -1,6 +1,6 @@
 ---
 name: run
-description: Launch and drive the SingScore (Personal-Karaoke) app locally — starts the Python job server and Vite frontend dev server, then opens it in the browser. Use for "run the app", "open karaoke", "start singscore", "launch the site".
+description: Launch and drive the SingScore app locally — starts the Python job server and Vite frontend dev server, then opens it in the browser. Use for "run the app", "open karaoke", "start singscore", "launch the site".
 metadata:
   author: owen
   version: "1.0.0"
