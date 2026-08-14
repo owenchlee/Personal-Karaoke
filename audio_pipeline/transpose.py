@@ -14,6 +14,13 @@ real key-change amounts. Confirmed directly against a real cached song (not just
 a 3-semitone shift of a 214.7s stereo instrumental measured within ~0.12 semitone of the requested
 amount (pYIN-tracked) and completed in ~12s on this CPU -- faster than the librosa alternative
 benchmarked for the same file (~20s) as well as higher quality.
+
+Also passes `--fine` to select Rubber Band's R3 engine. The CLI's default (used when neither `-2`
+nor `-3` is given) is the older R2 engine, kept only for backward compatibility; R2's phase-vocoder
+smears transients and washes out detail on dense multi-instrument mixes, which is what made shifted
+instrumentals sound blurry/muffled even with `--formant` on. R3 "almost always produces better
+results than the R2 engine" per `rubberband --help`, at the cost of noticeably higher CPU time --
+acceptable here since transposes are cached (see scripts/server.py's transpose endpoint).
 """
 import json
 import shutil
@@ -67,7 +74,9 @@ def transpose_song(song_cache_dir: str | Path, semitones: int, output_dir: str |
     output_dir.mkdir(parents=True, exist_ok=True)
 
     audio, sample_rate = sf.read(song_cache_dir / "instrumental.wav")
-    shifted_audio = pyrb.pitch_shift(audio, sample_rate, n_steps=semitones, rbargs={"--formant": ""})
+    shifted_audio = pyrb.pitch_shift(
+        audio, sample_rate, n_steps=semitones, rbargs={"--formant": "", "--fine": ""}
+    )
 
     instrumental_path = output_dir / "instrumental.wav"
     sf.write(instrumental_path, shifted_audio, sample_rate)
