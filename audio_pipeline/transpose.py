@@ -19,8 +19,11 @@ Also passes `--fine` to select Rubber Band's R3 engine. The CLI's default (used 
 nor `-3` is given) is the older R2 engine, kept only for backward compatibility; R2's phase-vocoder
 smears transients and washes out detail on dense multi-instrument mixes, which is what made shifted
 instrumentals sound blurry/muffled even with `--formant` on. R3 "almost always produces better
-results than the R2 engine" per `rubberband --help`, at the cost of noticeably higher CPU time --
-acceptable here since transposes are cached (see scripts/server.py's transpose endpoint).
+results than the R2 engine" per `rubberband --help`. Confirmed against the same category of real
+cached song as above: a 3-semitone shift of a 275.3s stereo instrumental took ~58s on this CPU with
+R3 (~21% of the song's own duration) -- roughly 5x R2's ~12s, and now slower than the librosa
+alternative this module was originally chosen over. Accepted anyway for the clearer mix, since
+transposes are cached (see scripts/server.py's transpose endpoint) and the cost is paid once.
 """
 import json
 import shutil

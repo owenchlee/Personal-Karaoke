@@ -21,11 +21,11 @@ const MAX_TRANSPOSE_SEMITONES = 12
 
 // The transpose request has no real progress signal to report (pyrubberband blocks on a single
 // `rubberband` subprocess call with nothing to poll -- see audio_pipeline/transpose.py), so the
-// bar below is driven by an elapsed-time estimate instead: calibrated against that file's own
-// benchmark comment (a 214.7s instrumental took ~12s on the reference CPU, i.e. ~5.6% of the
-// song's own duration), scaled to this song's length. Capped short of 100% so a slower machine
-// doesn't leave the bar sitting at "done" while the request is still in flight.
-const TRANSPOSE_REALTIME_ESTIMATE_FACTOR = 12 / 214.7
+// bar below is driven by an elapsed-time estimate instead: calibrated against that file's own R3
+// benchmark comment (a 275.3s instrumental took ~58s on the reference CPU, i.e. ~21% of the song's
+// own duration), scaled to this song's length. Capped short of 100% so a slower machine doesn't
+// leave the bar sitting at "done" while the request is still in flight.
+const TRANSPOSE_REALTIME_ESTIMATE_FACTOR = 58 / 275.3
 const MIN_TRANSPOSE_ESTIMATE_MS = 1500
 const MAX_ESTIMATED_TRANSPOSE_PROGRESS = 0.95
 const FALLBACK_SONG_DURATION_SECONDS = 180
