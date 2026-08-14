@@ -640,6 +640,7 @@ code {
 }
 
 .progress-bar-fill {
+  display: block;
   height: 100%;
   background: var(--accent);
   border-radius: inherit;
