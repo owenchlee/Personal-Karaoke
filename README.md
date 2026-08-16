@@ -45,28 +45,82 @@ Everything after step 1 is cached per song, so replaying is instant and processi
 
 ## Running it locally
 
-**Requires:** Python 3.11, Node.js, and `ffmpeg` on your `PATH`.
+**Requires:** [Python 3.11](https://www.python.org/downloads/), [Node.js](https://nodejs.org),
+and `ffmpeg` on your `PATH` (Windows: `winget install ffmpeg`; macOS: `brew install ffmpeg`).
+
+You'll run two programs side by side, each in its **own terminal window that you leave open**
+the whole time you're using the app: the **backend** (does the audio processing) and the
+**frontend** (the webpage you actually use). Closing a window stops that half.
+
+### 1. Clone the repo
 
 ```bash
 git clone https://github.com/owenchlee/SingScore.git
 cd SingScore
+```
 
-# 1. Start the backend (leave this terminal running)
+### 2. Start the backend
+
+Still in that terminal, run:
+
+**Windows:**
+```bat
 py -3.11 -m venv venv
-venv/Scripts/python.exe -m pip install torch torchaudio
-venv/Scripts/python.exe -m pip install -r requirements.txt
-venv/Scripts/python.exe scripts/server.py
+venv\Scripts\python.exe -m pip install torch torchaudio
+venv\Scripts\python.exe -m pip install -r requirements.txt
+venv\Scripts\python.exe scripts\server.py
+```
 
-# 2. In a second terminal, start the frontend
+**macOS / Linux:**
+```bash
+python3.11 -m venv venv
+venv/bin/python -m pip install torch torchaudio
+venv/bin/python -m pip install -r requirements.txt
+venv/bin/python scripts/server.py
+```
+
+Wait until it prints `Uvicorn running on http://127.0.0.1:8000`. **Leave this window open** —
+that line means the backend is up and running in it.
+
+### 3. Start the frontend
+
+Open a **second, new** terminal window (don't reuse or close the first one), `cd` into the
+`SingScore` folder again, then run:
+
+```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-Open the URL the frontend prints (usually `http://localhost:5173`), paste a song link, and it
-processes end-to-end (~1.5-7 min depending on hardware) then drops you into the game. An NVIDIA
-GPU is auto-detected and used if present; otherwise everything falls back to CPU. Already-processed
-songs replay instantly from a local cache.
+### 4. Open the app
+
+This second terminal will print a line like:
+
+```
+  ➜  Local:   http://localhost:5173/
+```
+
+Click that link, or copy the exact URL it printed into your browser. **Use the URL from your own
+terminal**, not a bookmarked or guessed one — if something else on your machine is already using
+port 5173, Vite automatically switches to the next free port (5174, 5175, ...) and prints
+whichever one it actually picked.
+
+Paste a song link and it processes end-to-end (~1.5-7 min depending on hardware) then drops you
+into the game. An NVIDIA GPU is auto-detected and used if present; otherwise everything falls
+back to CPU. Already-processed songs replay instantly from a local cache.
+
+### If it's not working
+
+- **Nothing seemed to happen after pasting a command** — scroll up in that terminal; the real
+  error is usually a few lines above where the prompt returned. Most common: the command isn't
+  found (Python/Node isn't installed, or wasn't added to `PATH` during install).
+- **`localhost` opens some other website** — that's a stale/bookmarked URL. Go back to the
+  frontend terminal (step 3) and use the exact URL it printed (step 4).
+- **Backend terminal errors out mentioning port 8000** — something else on your machine is
+  already using that port. Close that other program, then re-run
+  `venv\Scripts\python.exe scripts\server.py` (or the `venv/bin/python` equivalent).
+- Both terminal windows need to stay open the whole time you're playing.
 
 See [`NOTES.md`](NOTES.md) for the full phase-by-phase design history and the reasoning behind
 specific tuning decisions.
